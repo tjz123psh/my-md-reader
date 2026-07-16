@@ -73,7 +73,7 @@ This is the live project state. Update it after each coherent milestone.
 Updated 2026-07-17. The repository is initialized on `main` with the GitHub
 `origin` configured. The native reader, workspace navigation, selection-aware
 OpenCode conversation and selected-line diff workflow are functional. There are
-39 passing unit tests plus successful Meson compile/test runs.
+40 passing unit tests plus successful Meson compile/test runs.
 
 OpenCode 1.18.2 must remain isolated through both the injected deny-all agent
 and the private temporary runtime directory. Do not change it back to
@@ -103,7 +103,7 @@ plus the real About dialog confirmed GTK resolves the icon. The source render is
 in `/tmp/mdreader-icon-512.png` and the About acceptance screenshot is
 `/tmp/mdreader-icon-about-960.png`.
 
-There are now 39 passing unit tests plus successful compileall, JavaScript
+There are now 40 passing unit tests plus successful compileall, JavaScript
 syntax and four Meson tests. The GTK smoke waits for a real WebKit
 `document-presented` signal and covers both normal and missing-OpenCode startup;
 it skips only when no graphical D-Bus session is available or another MD Reader
@@ -115,3 +115,8 @@ It validates dependencies, downloads the requested GitHub ref and installs to
 `~/.local` without invoking sudo. The installed launcher carries its Meson
 prefix so Python modules, GResource assets and GSettings data also work from a
 custom `MDREADER_PREFIX`.
+
+Installed Markdown rendering now reads `reader.css` and `bridge.js` from the
+registered application GResource instead of assuming the source-tree layout.
+Meson tests include a regression check that forbids filesystem asset fallback
+while rendering from the built resource bundle.

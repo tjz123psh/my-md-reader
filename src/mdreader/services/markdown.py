@@ -6,6 +6,11 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import gi
+
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio, GLib
+
 from mdreader.models import OutlineItem, RenderedDocument
 
 
@@ -35,9 +40,7 @@ class _Slugger:
 
 class MarkdownRenderer:
     def __init__(self, assets_root: str | Path | None = None) -> None:
-        if assets_root is None:
-            assets_root = Path(__file__).parents[2] / "resources" / "reader"
-        self.assets_root = Path(assets_root)
+        self.assets_root = Path(assets_root) if assets_root is not None else None
 
     def render(self, source: str, *, title: str = "Document", zoom: int = 100) -> RenderedDocument:
         try:
@@ -148,8 +151,8 @@ class MarkdownRenderer:
         markdown.renderer.rules["fence"] = render_fence
 
     def _html_document(self, body: str, *, title: str, zoom: int) -> str:
-        css = (self.assets_root / "reader.css").read_text(encoding="utf-8")
-        bridge = (self.assets_root / "bridge.js").read_text(encoding="utf-8")
+        css = self._read_asset("reader.css")
+        bridge = self._read_asset("bridge.js")
         bounded_zoom = max(75, min(200, zoom))
         return f"""<!doctype html>
 <html lang="en">
@@ -166,3 +169,16 @@ class MarkdownRenderer:
 </body>
 </html>
 """
+
+    def _read_asset(self, name: str) -> str:
+        if self.assets_root is not None:
+            return (self.assets_root / name).read_text(encoding="utf-8")
+
+        resource_path = f"/io/github/pang/mdreader/reader/{name}"
+        try:
+            data = Gio.resources_lookup_data(resource_path, Gio.ResourceLookupFlags.NONE)
+            return data.get_data().decode("utf-8")
+        except GLib.Error:
+            # Direct source-tree tests do not register the application bundle.
+            source_asset = Path(__file__).parents[2] / "resources" / "reader" / name
+            return source_asset.read_text(encoding="utf-8")

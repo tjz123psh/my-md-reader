@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+import gi
+
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio
 
 from mdreader.services.markdown import MarkdownRenderer
 
@@ -58,6 +65,26 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("window.mdReader", self.rendered.html)
         self.assertNotIn("<script src=", self.rendered.html)
         self.assertNotIn("@import url", self.rendered.html)
+
+    def test_registered_gresource_is_used_without_source_assets(self) -> None:
+        resource_file = os.environ.get("MDREADER_RESOURCE_FILE")
+        if not resource_file:
+            self.skipTest("built GResource is only available in the Meson test")
+
+        resource = Gio.Resource.load(resource_file)
+        Gio.resources_register(resource)
+        try:
+            with patch.object(
+                Path,
+                "read_text",
+                side_effect=AssertionError("source assets must not be read"),
+            ):
+                rendered = MarkdownRenderer().render("# Installed resource")
+        finally:
+            Gio.resources_unregister(resource)
+
+        self.assertIn("window.mdReader", rendered.html)
+        self.assertIn("--reader-zoom: 1.00", rendered.html)
 
     def test_reader_reports_active_outline_heading(self) -> None:
         self.assertIn("messageHandlers?.outline", self.rendered.html)

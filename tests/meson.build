@@ -1,5 +1,6 @@
 test_env = environment()
 test_env.set('PYTHONPATH', meson.project_source_root() / 'src')
+test_env.set('MDREADER_RESOURCE_FILE', resources.full_path())
 
 test(
   'python-unit-tests',
