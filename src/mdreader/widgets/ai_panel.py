@@ -13,6 +13,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
 from mdreader.models import DocumentSelection
+from mdreader.services.ai_markdown import AiMarkdownBlock, AiMarkdownRenderer
 
 
 class AiPanel(Gtk.Box):
@@ -31,8 +32,12 @@ class AiPanel(Gtk.Box):
         self._on_cancel = on_cancel
         self._selection = DocumentSelection()
         self._document: Path | None = None
-        self._assistant_label: Gtk.Label | None = None
+        self._assistant_body: Gtk.Box | None = None
+        self._assistant_content: Gtk.Box | None = None
+        self._thinking_row: Gtk.Box | None = None
         self._assistant_text = ""
+        self._render_source_id = 0
+        self._markdown = AiMarkdownRenderer()
         self._running = False
         self._available = (
             os.environ.get("MDREADER_TEST_OPENCODE_MISSING") != "1"
@@ -174,7 +179,9 @@ class AiPanel(Gtk.Box):
         self._model_label.set_tooltip_text(model)
         if not new_conversation:
             return
-        self._assistant_label = None
+        self._assistant_body = None
+        self._assistant_content = None
+        self._thinking_row = None
         self._assistant_text = ""
         self._clear_box(self._transcript)
         self._status.set_icon_name("chat-symbolic")
@@ -210,41 +217,58 @@ class AiPanel(Gtk.Box):
         label.add_css_class("caption")
         label.add_css_class("dimmed")
         block.append(label)
-        self._assistant_label = Gtk.Label(
+
+        self._assistant_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self._assistant_body.add_css_class("assistant-message")
+        self._thinking_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        self._thinking_row.add_css_class("ai-thinking")
+        spinner = Adw.Spinner()
+        spinner.update_property([Gtk.AccessibleProperty.LABEL], ["OpenCode is thinking"])
+        thinking_label = Gtk.Label(
+            label="Thinking about the selected change…" if edit_mode else "Thinking…",
             xalign=0,
-            yalign=0,
-            wrap=True,
-            wrap_mode=Pango.WrapMode.WORD_CHAR,
-            selectable=True,
         )
-        self._assistant_label.add_css_class("assistant-message")
-        if edit_mode:
-            self._assistant_label.set_label("Preparing a change for review…")
-            self._assistant_label.add_css_class("dimmed")
-        block.append(self._assistant_label)
+        thinking_label.add_css_class("caption")
+        self._thinking_row.append(spinner)
+        self._thinking_row.append(thinking_label)
+        self._assistant_body.append(self._thinking_row)
+
+        self._assistant_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self._assistant_content.add_css_class("ai-markdown")
+        self._assistant_body.append(self._assistant_content)
+        block.append(self._assistant_body)
         self._transcript.append(block)
         self._assistant_text = ""
         self._set_running(True)
         self._scroll_to_bottom()
 
     def append_assistant_text(self, text: str) -> None:
-        if self._assistant_label is None:
+        if self._assistant_body is None:
             self.begin_assistant()
         self._assistant_text += text
-        self._assistant_label.set_label(self._assistant_text)
+        if not self._render_source_id:
+            self._render_source_id = GLib.timeout_add(60, self._render_assistant_text)
         self._scroll_to_bottom()
 
     def finish_assistant(self, message: str = "") -> None:
-        if message and self._assistant_label is not None:
-            self._assistant_label.set_label(message)
-            self._assistant_label.remove_css_class("dimmed")
+        self._cancel_render_timeout()
+        if message:
+            self._assistant_text = message
+        self._render_assistant_text()
+        self._remove_thinking_row()
         self._set_running(False)
 
     def show_error(self, message: str) -> None:
-        if self._assistant_label is not None and not self._assistant_text:
-            self._assistant_label.set_label(message)
-            self._assistant_label.add_css_class("error")
+        self._cancel_render_timeout()
+        if self._assistant_content is not None and not self._assistant_text:
+            self._clear_box(self._assistant_content)
+            error_label = self._new_markup_label(GLib.markup_escape_text(message))
+            error_label.add_css_class("error")
+            self._assistant_content.append(error_label)
+            self._remove_thinking_row()
         else:
+            self._render_assistant_text()
+            self._remove_thinking_row()
             self._transcript.append(self._message_block("OpenCode", message, "error"))
         self._set_running(False)
         self._scroll_to_bottom()
@@ -298,6 +322,95 @@ class AiPanel(Gtk.Box):
     def _hide_status(self) -> None:
         if self._status.get_parent() is self._transcript:
             self._transcript.remove(self._status)
+
+    def _render_assistant_text(self) -> bool:
+        self._render_source_id = 0
+        if self._assistant_content is None:
+            return GLib.SOURCE_REMOVE
+        self._clear_box(self._assistant_content)
+        dark = Adw.StyleManager.get_default().get_dark()
+        for block in self._markdown.render(self._assistant_text, dark=dark):
+            self._assistant_content.append(self._markdown_block(block))
+        self._scroll_to_bottom()
+        return GLib.SOURCE_REMOVE
+
+    def _markdown_block(self, block: AiMarkdownBlock) -> Gtk.Widget:
+        if block.kind == "separator":
+            separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            separator.add_css_class("ai-markdown-separator")
+            return separator
+        if block.kind == "table":
+            return self._markdown_table(block)
+        if block.kind == "code":
+            code_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+            code_box.add_css_class("ai-code-block")
+            if block.language:
+                language = Gtk.Label(label=block.language, xalign=0)
+                language.add_css_class("caption")
+                language.add_css_class("dimmed")
+                code_box.append(language)
+            code = self._new_markup_label(block.markup)
+            code.add_css_class("monospace")
+            code.add_css_class("ai-code-text")
+            code_box.append(code)
+            return code_box
+
+        label = self._new_markup_label(block.markup)
+        label.add_css_class(f"ai-markdown-{block.kind}")
+        if block.kind == "heading":
+            label.add_css_class("heading")
+            label.add_css_class(f"ai-heading-{min(3, max(1, block.level))}")
+        elif block.kind == "list-item":
+            label.set_margin_start(min(36, block.level * 14))
+        return label
+
+    def _markdown_table(self, block: AiMarkdownBlock) -> Gtk.Widget:
+        grid = Gtk.Grid(column_spacing=0, row_spacing=0)
+        grid.add_css_class("ai-table")
+        grid.set_halign(Gtk.Align.START)
+        grid.set_valign(Gtk.Align.START)
+        column_count = max((len(row) for row in block.rows), default=1)
+        cell_width = max(8, 38 // column_count)
+        for row_index, row in enumerate(block.rows):
+            for column_index, cell in enumerate(row):
+                label = self._new_markup_label(cell.markup)
+                label.set_max_width_chars(cell_width)
+                label.add_css_class("ai-table-cell")
+                if cell.header:
+                    label.add_css_class("ai-table-header")
+                grid.attach(label, column_index, row_index, 1, 1)
+        return grid
+
+    def _new_markup_label(self, markup: str) -> Gtk.Label:
+        label = Gtk.Label(
+            xalign=0,
+            yalign=0,
+            wrap=True,
+            wrap_mode=Pango.WrapMode.WORD_CHAR,
+            selectable=True,
+        )
+        label.set_markup(markup)
+        label.connect("activate-link", self._on_markdown_link)
+        return label
+
+    def _on_markdown_link(self, _label: Gtk.Label, uri: str) -> bool:
+        launcher = Gtk.UriLauncher.new(uri)
+        launcher.launch(self.get_root(), None, None, None)
+        return True
+
+    def _remove_thinking_row(self) -> None:
+        if (
+            self._assistant_body is not None
+            and self._thinking_row is not None
+            and self._thinking_row.get_parent() is self._assistant_body
+        ):
+            self._assistant_body.remove(self._thinking_row)
+        self._thinking_row = None
+
+    def _cancel_render_timeout(self) -> None:
+        if self._render_source_id:
+            GLib.source_remove(self._render_source_id)
+            self._render_source_id = 0
 
     @staticmethod
     def _message_block(role: str, text: str, css_class: str) -> Gtk.Widget:

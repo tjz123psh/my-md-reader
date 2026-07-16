@@ -215,6 +215,11 @@ pre {
   tab-size: 4;
 }
 
+.source-fallback {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 table {
   display: block;
   width: max-content;

@@ -64,6 +64,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._available_models: tuple[str, ...] = ()
         self._model_load_generation = 0
         self._scan_generation = 0
+        self._test_source_line = 0
         self._zoom = settings.get_int("document-zoom")
 
         self.set_default_size(
@@ -471,6 +472,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._document.load_document(
             document_path,
             zoom=self._zoom,
+            workspace_root=self._workspace.root,
             on_loaded=self._on_document_loaded,
             on_error=self._on_document_error,
         )
@@ -478,6 +480,13 @@ class MdReaderWindow(Adw.ApplicationWindow):
     def _on_document_loaded(self, rendered: RenderedDocument) -> None:
         self._current_source = rendered.source
         self._library.set_outline(rendered.outline)
+        preview_ai = os.environ.pop("MDREADER_TEST_AI_PREVIEW", "") == "1"
+        preview_thinking = os.environ.pop("MDREADER_TEST_AI_THINKING", "") == "1"
+        if preview_ai or preview_thinking:
+            GLib.timeout_add(250, self._show_ai_preview_smoke, preview_thinking)
+        test_source_line = os.environ.pop("MDREADER_TEST_SOURCE_LINE", "").strip()
+        if test_source_line.isdigit():
+            self._test_source_line = int(test_source_line)
         test_heading = os.environ.pop("MDREADER_TEST_HEADING", "").strip()
         if test_heading:
             self._library.show_outline()
@@ -487,8 +496,40 @@ class MdReaderWindow(Adw.ApplicationWindow):
         if question:
             GLib.timeout_add(400, self._send_smoke_question, question)
 
+    def _show_ai_preview_smoke(self, thinking_only: bool) -> bool:
+        self._ai_split.set_show_sidebar(True)
+        self._ai.append_user("为什么这么多人选择手动安装？")
+        self._ai.begin_assistant()
+        if not thinking_only:
+            self._ai.append_assistant_text(
+                """## 为什么保留手动安装
+
+`archinstall` 适合快速进入系统；手动安装更适合以下情况：
+
+- **分区更灵活**：自定义子卷、加密、LVM 和独立 `/var`
+- **更容易排错**：逐步理解 `pacstrap`、`chroot` 与引导器
+
+| 方式 | 更适合 |
+| --- | --- |
+| archinstall | 常规安装与快速部署 |
+| 手动安装 | 特殊布局和学习过程 |
+
+> 文档同时给出两条路线是合理的，选择取决于目标。
+
+```bash
+pacstrap -K /mnt base linux linux-firmware
+```
+"""
+            )
+            self._ai.finish_assistant()
+        return GLib.SOURCE_REMOVE
+
     def _scroll_smoke_heading(self, slug: str) -> bool:
         self._document.scroll_to_heading(slug)
+        return GLib.SOURCE_REMOVE
+
+    def _scroll_smoke_source(self, line: int) -> bool:
+        self._document.scroll_to_source(line)
         return GLib.SOURCE_REMOVE
 
     def _send_smoke_question(self, question: str) -> bool:
@@ -508,6 +549,10 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._library.set_active_outline(slug)
 
     def _on_document_presented(self, _view: DocumentView) -> None:
+        if self._test_source_line:
+            source_line = self._test_source_line
+            self._test_source_line = 0
+            GLib.timeout_add(200, self._scroll_smoke_source, source_line)
         if os.environ.pop("MDREADER_TEST_QUIT_ON_PRESENT", "") == "1":
             GLib.timeout_add(200, self._quit_presented_smoke)
 

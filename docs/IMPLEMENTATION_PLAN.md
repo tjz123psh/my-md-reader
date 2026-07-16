@@ -34,6 +34,7 @@ This is the live project state. Update it after each coherent milestone.
 - [x] Render fenced code with Pygments.
 - [x] Bundle reader HTML/CSS/selection bridge in GResource.
 - [x] Load local images safely and open external links outside WebKit.
+- [x] Resolve unique workspace-local Obsidian image embeds safely.
 - [x] Implement outline navigation.
 - [x] Track and highlight the active outline heading while scrolling.
 - [x] Implement document search and 75–200% zoom.
@@ -47,6 +48,7 @@ This is the live project state. Update it after each coherent milestone.
 - [x] Build file/heading/excerpt-lines/selection context envelopes.
 - [x] Implement the editorial context rail and source jump-back.
 - [x] Add model selection without storing credentials.
+- [x] Render assistant Markdown with syntax color and a Thinking state.
 
 ## Milestone 5 — safe AI file changes
 
@@ -73,7 +75,7 @@ This is the live project state. Update it after each coherent milestone.
 Updated 2026-07-17. The repository is initialized on `main` with the GitHub
 `origin` configured. The native reader, workspace navigation, selection-aware
 OpenCode conversation and selected-line diff workflow are functional. There are
-40 passing unit tests plus successful Meson compile/test runs.
+50 passing unit tests plus successful Meson compile/test runs.
 
 OpenCode 1.18.2 must remain isolated through both the injected deny-all agent
 and the private temporary runtime directory. Do not change it back to
@@ -103,7 +105,7 @@ plus the real About dialog confirmed GTK resolves the icon. The source render is
 in `/tmp/mdreader-icon-512.png` and the About acceptance screenshot is
 `/tmp/mdreader-icon-about-960.png`.
 
-There are now 40 passing unit tests plus successful compileall, JavaScript
+There are now 50 passing unit tests plus successful compileall, JavaScript
 syntax and four Meson tests. The GTK smoke waits for a real WebKit
 `document-presented` signal and covers both normal and missing-OpenCode startup;
 it skips only when no graphical D-Bus session is available or another MD Reader
@@ -120,3 +122,18 @@ Installed Markdown rendering now reads `reader.css` and `bridge.js` from the
 registered application GResource instead of assuming the source-tree layout.
 Meson tests include a regression check that forbids filesystem asset fallback
 while rendering from the built resource bundle.
+
+The renderer now tolerates empty-language fenced code and falls back to escaped
+source if a Markdown extension fails, so unusual syntax cannot blank the
+document. Workspace-contained standard image paths and unique Obsidian
+`![[image|width]]` embeds are supported; the real Arch installation notes
+rendered both documents and all 23 referenced attachments per document.
+
+AI responses now use a safe native Markdown block renderer for headings,
+lists, tables, quotes, links and Pygments-colored code. An accessible
+`AdwSpinner` shows “Thinking…” immediately after send. Real Niri screenshots at
+640, 960, 1280 and 1920px found no clipping; the inspected files are
+`/tmp/mdreader-ai-640-open3.png`, `/tmp/mdreader-ai-960-final.png`,
+`/tmp/mdreader-ai-1280.png` and `/tmp/mdreader-ai-1920.png`, with Thinking and
+Obsidian image checks in `/tmp/mdreader-ai-thinking-960.png` and
+`/tmp/mdreader-obsidian-image-final.png`.

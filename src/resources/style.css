@@ -25,6 +25,71 @@
   color: @view_fg_color;
 }
 
+.ai-thinking {
+  color: @accent_color;
+  min-height: 24px;
+}
+
+.ai-markdown-heading {
+  color: @accent_color;
+}
+
+.ai-heading-1 {
+  font-size: 1.2em;
+}
+
+.ai-heading-2 {
+  font-size: 1.1em;
+}
+
+.ai-heading-3 {
+  font-size: 1.02em;
+}
+
+.ai-markdown-quote {
+  color: alpha(@view_fg_color, 0.72);
+  border-left: 3px solid @success_color;
+  padding-left: 10px;
+}
+
+.ai-markdown-list-item {
+  padding-left: 2px;
+}
+
+.ai-code-block {
+  color: @view_fg_color;
+  background: alpha(@view_fg_color, 0.055);
+  border: 1px solid alpha(@view_fg_color, 0.14);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.ai-code-text {
+  font-size: 0.9em;
+}
+
+.ai-table {
+  border: 1px solid alpha(@view_fg_color, 0.16);
+  border-radius: 7px;
+}
+
+.ai-table-cell {
+  padding: 7px 9px;
+  border-right: 1px solid alpha(@view_fg_color, 0.12);
+  border-bottom: 1px solid alpha(@view_fg_color, 0.12);
+}
+
+.ai-table-header {
+  color: @accent_color;
+  background: alpha(@accent_color, 0.08);
+  font-weight: 700;
+}
+
+.ai-markdown-separator {
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
 .reader-fallback {
   background: @view_bg_color;
 }

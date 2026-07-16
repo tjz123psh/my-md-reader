@@ -89,6 +89,7 @@ class DocumentView(Gtk.Box):
         path: Path,
         *,
         zoom: int,
+        workspace_root: Path | None = None,
         on_loaded: Callable[[RenderedDocument], None],
         on_error: Callable[[Exception], None],
     ) -> None:
@@ -102,7 +103,13 @@ class DocumentView(Gtk.Box):
             try:
                 with path.open("r", encoding="utf-8", newline="") as stream:
                     source = stream.read()
-                rendered = self._renderer.render(source, title=path.name, zoom=self._zoom)
+                rendered = self._renderer.render(
+                    source,
+                    title=path.name,
+                    zoom=self._zoom,
+                    document_path=path,
+                    workspace_root=workspace_root,
+                )
             except Exception as error:  # Returned to GTK as a precise error state.
                 GLib.idle_add(self._finish_error, generation, error, on_error)
                 return

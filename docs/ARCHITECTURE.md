@@ -63,6 +63,13 @@ injecting scripts into the privileged selection bridge. Remote scripts,
 styles and fonts are never loaded. External links open through the desktop
 URI launcher rather than navigating the reading surface.
 
+Standard relative image paths may traverse parent directories only while the
+resolved target remains inside the canonical workspace. Obsidian image embeds
+such as `![[Pasted image.png|617]]` are rewritten without changing source-line
+counts when exactly one matching image exists inside the workspace. Missing,
+ambiguous, non-image and escaping targets remain visible as source text rather
+than being guessed or loaded.
+
 The renderer owns stable source mappings. Block tokens receive
 `data-source-start` and `data-source-end` attributes. Selection JavaScript
 finds the first and last mapped ancestors and sends this structured payload:
@@ -119,6 +126,13 @@ Conversation context sends the selection and surrounding section first. It
 does not resend an entire large file on every turn. The first version has no
 repository-wide search tools; users open or select the additional document
 context they want to discuss.
+
+Assistant Markdown is parsed locally with raw HTML disabled and mapped to
+native GTK labels, grids and code blocks. Headings, emphasis, links, lists,
+quotes and tables retain structure; fenced code uses Pygments colors. An
+`AdwSpinner` labeled “Thinking…” appears as soon as a request is accepted and
+is removed at completion. It indicates process state and never exposes or
+fabricates hidden model reasoning.
 
 OpenCode never runs with `--auto`. The gateway injects an app-owned agent via
 `OPENCODE_CONFIG_CONTENT`, sets `OPENCODE_PERMISSION={"*":"deny"}`, disables

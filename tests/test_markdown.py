@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -50,6 +51,20 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("class=\"highlight", self.rendered.html)
         self.assertIn("print", self.rendered.html)
 
+    def test_fence_without_language_is_rendered_instead_of_crashing(self) -> None:
+        rendered = MarkdownRenderer().render("Before\n\n```\necho safe\n```\n")
+        self.assertIn("echo safe", rendered.html)
+        self.assertIn("<pre", rendered.html)
+        self.assertNotIn('<pre class="source-fallback"', rendered.html)
+
+    def test_unexpected_markdown_extension_error_falls_back_to_readable_source(self) -> None:
+        renderer = MarkdownRenderer()
+        with patch.object(renderer, "_decorate_tokens", side_effect=IndexError):
+            rendered = renderer.render("# Still readable\n\nunusual **syntax**\n")
+        self.assertIn('class="source-fallback"', rendered.html)
+        self.assertIn("# Still readable", rendered.html)
+        self.assertIn("unusual **syntax**", rendered.html)
+
     def test_gfm_table_rule_is_enabled(self) -> None:
         self.assertIn("<table", self.rendered.html)
         self.assertIn("<th", self.rendered.html)
@@ -96,6 +111,68 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn('data-blocked-source="https://example.com/tracker.png"', self.rendered.html)
         self.assertIn("default-src 'none'", self.rendered.html)
         self.assertIn("img-src file: data:", self.rendered.html)
+
+    def test_obsidian_image_embed_resolves_unique_workspace_attachment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            document = root / "guide.md"
+            document.write_text("placeholder", encoding="utf-8")
+            attachment = root / "附件" / "Pasted image.png"
+            attachment.parent.mkdir()
+            attachment.write_bytes(b"image")
+
+            rendered = MarkdownRenderer().render(
+                "![[Pasted image.png|617]]\n",
+                document_path=document,
+                workspace_root=root,
+            )
+
+        self.assertIn("<img", rendered.html)
+        self.assertIn("Pasted%20image.png", rendered.html)
+        self.assertNotIn("![[", rendered.html)
+
+    def test_obsidian_image_embed_stays_text_when_attachment_is_ambiguous(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            document = root / "guide.md"
+            document.write_text("placeholder", encoding="utf-8")
+            for directory in ("one", "two"):
+                attachment = root / directory / "same.png"
+                attachment.parent.mkdir()
+                attachment.write_bytes(b"image")
+
+            rendered = MarkdownRenderer().render(
+                "![[same.png]]\n",
+                document_path=document,
+                workspace_root=root,
+            )
+
+        self.assertIn("![[same.png]]", rendered.html)
+
+    def test_parent_image_path_is_allowed_only_inside_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            document = root / "docs" / "guide.md"
+            document.parent.mkdir()
+            document.write_text("placeholder", encoding="utf-8")
+            image = root / "assets" / "inside.png"
+            image.parent.mkdir()
+            image.write_bytes(b"image")
+
+            rendered = MarkdownRenderer().render(
+                "![inside](../assets/inside.png)\n",
+                document_path=document,
+                workspace_root=root,
+            )
+            blocked = MarkdownRenderer().render(
+                "![outside](../../outside.png)\n",
+                document_path=document,
+                workspace_root=root,
+            )
+
+        self.assertNotIn('src="about:blank"', rendered.html)
+        self.assertIn('src="../assets/inside.png"', rendered.html)
+        self.assertIn("data-blocked-source", blocked.html)
 
     def test_counts_source_lines(self) -> None:
         self.assertEqual(self.rendered.source_line_count, len(self.source.splitlines()))
