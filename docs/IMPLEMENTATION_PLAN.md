@@ -66,10 +66,11 @@ This is the live project state. Update it after each coherent milestone.
 - [x] Add a release-quality application icon.
 - [x] Document later Flatpak/OpenCode portal constraints.
 - [x] Add process-level GTK smoke coverage with and without OpenCode.
+- [x] Add a curl-based user installer for native `~/.local` installs.
 
 ## Current handoff
 
-Updated 2026-07-16. The repository is initialized on `main` with the GitHub
+Updated 2026-07-17. The repository is initialized on `main` with the GitHub
 `origin` configured. The native reader, workspace navigation, selection-aware
 OpenCode conversation and selected-line diff workflow are functional. There are
 39 passing unit tests plus successful Meson compile/test runs.
@@ -108,3 +109,9 @@ syntax and four Meson tests. The GTK smoke waits for a real WebKit
 it skips only when no graphical D-Bus session is available or another MD Reader
 instance already owns the application ID. Preserve the 760sp and 1120sp
 breakpoints unless later Niri screenshots provide evidence to change them.
+
+The repository now provides `scripts/install.sh` as a curl-based installer.
+It validates dependencies, downloads the requested GitHub ref and installs to
+`~/.local` without invoking sudo. The installed launcher carries its Meson
+prefix so Python modules, GResource assets and GSettings data also work from a
+custom `MDREADER_PREFIX`.

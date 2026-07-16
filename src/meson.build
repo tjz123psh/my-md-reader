@@ -23,11 +23,15 @@ resources = gnome.compile_resources(
   install_dir: pkgdatadir,
 )
 
+python_install_dir = python.get_install_dir()
 launcher = configure_file(
   input: 'md-reader.in',
   output: 'md-reader',
   configuration: {
     'PYTHON': python.full_path(),
+    'PYTHON_INSTALL_DIR': python_install_dir,
+    'PKGDATADIR': pkgdatadir,
+    'DATADIR': get_option('prefix') / get_option('datadir'),
   },
 )
 
@@ -42,7 +46,6 @@ run_target(
   command: [python, launcher],
 )
 
-python_install_dir = python.get_install_dir()
 install_subdir(
   'mdreader',
   install_dir: python_install_dir,

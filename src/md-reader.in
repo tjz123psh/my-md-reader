@@ -1,4 +1,20 @@
 #!@PYTHON@
+import os
+import sys
+
+# Meson devenv already points at the source tree and build resources. An
+# installed launcher must instead make its configured prefix self-contained.
+if "MDREADER_RESOURCE_FILE" not in os.environ:
+    sys.path.insert(0, "@PYTHON_INSTALL_DIR@")
+    os.environ["MDREADER_RESOURCE_FILE"] = "@PKGDATADIR@/mdreader.gresource"
+
+    data_dir = "@DATADIR@"
+    data_dirs = os.environ.get(
+        "XDG_DATA_DIRS", "/usr/local/share:/usr/share"
+    ).split(os.pathsep)
+    if data_dir not in data_dirs:
+        os.environ["XDG_DATA_DIRS"] = os.pathsep.join([data_dir, *data_dirs])
+
 from mdreader.bootstrap import main
 
 raise SystemExit(main())
