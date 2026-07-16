@@ -1,0 +1,34 @@
+.library-pane,
+.ai-pane {
+  background: @sidebar_bg_color;
+}
+
+.pane-title {
+  font-weight: 700;
+}
+
+.context-rail {
+  border-left: 3px solid @accent_color;
+  padding-left: 12px;
+}
+
+.context-quote {
+  color: @view_fg_color;
+}
+
+.user-message {
+  color: @view_fg_color;
+  font-weight: 600;
+}
+
+.assistant-message {
+  color: @view_fg_color;
+}
+
+.reader-fallback {
+  background: @view_bg_color;
+}
+
+.zoom-label {
+  font-variant-numeric: tabular-nums;
+}

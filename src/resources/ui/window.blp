@@ -1,0 +1,85 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $MdReaderWindow: Adw.ApplicationWindow {
+  title: "MD Reader";
+  default-width: 1200;
+  default-height: 800;
+  width-request: 360;
+  height-request: 480;
+
+  content: Adw.ToastOverlay toast_overlay {
+    child: Adw.ToolbarView toolbar_view {
+      [top]
+      Adw.HeaderBar header_bar {
+        [start]
+        Gtk.Button files_button {
+          icon-name: "folder-symbolic";
+          tooltip-text: "Files and outline";
+          action-name: "win.toggle-library";
+        }
+
+        title-widget: Gtk.Label title_label {
+          label: "MD Reader";
+          ellipsize: end;
+          max-width-chars: 42;
+          single-line-mode: true;
+          styles ["heading"]
+        };
+
+        [end]
+        Gtk.Button ai_button {
+          icon-name: "chat-symbolic";
+          tooltip-text: "AI assistant";
+          action-name: "win.toggle-ai";
+        }
+
+        [end]
+        Gtk.MenuButton menu_button {
+          icon-name: "open-menu-symbolic";
+          tooltip-text: "Main menu";
+          menu-model: primary_menu;
+        }
+      }
+
+      content: Adw.Bin content_slot {};
+    };
+  };
+}
+
+menu primary_menu {
+  section {
+    item {
+      label: "Open Folder…";
+      action: "win.open-folder";
+    }
+    item {
+      label: "Find in Document";
+      action: "win.find";
+    }
+    item {
+      label: "Undo AI Change";
+      action: "win.undo-ai-change";
+    }
+  }
+  section {
+    item {
+      label: "Zoom In";
+      action: "win.zoom-in";
+    }
+    item {
+      label: "Zoom Out";
+      action: "win.zoom-out";
+    }
+    item {
+      label: "Actual Size";
+      action: "win.zoom-reset";
+    }
+  }
+  section {
+    item {
+      label: "About MD Reader";
+      action: "app.about";
+    }
+  }
+}

@@ -1,0 +1,110 @@
+# Implementation plan and handoff
+
+This is the live project state. Update it after each coherent milestone.
+
+## Milestone 0 — durable context and environment
+
+- [x] Record product contract and fresh-session prompt.
+- [x] Record architecture, security boundary and module ownership.
+- [x] Inspect real Niri output, presets and `prefer-no-csd`.
+- [x] Define visual tokens and wireframes for every preset.
+- [x] Install build/runtime development dependencies.
+
+## Milestone 1 — native application shell
+
+- [x] Add Meson project, package metadata and GResource layout.
+- [x] Add `Adw.Application` lifecycle and global actions.
+- [x] Add adaptive Files / Reader / AI composition.
+- [x] Add native empty state, primary menu and keyboard shortcuts.
+- [x] Add GSettings for window/session/zoom state.
+- [x] Build and launch the real binary.
+
+## Milestone 2 — workspace navigation
+
+- [x] Implement canonical workspace root and safe relative paths.
+- [x] Scan `.md`, `.markdown`, directories and supported local assets.
+- [x] Implement lazy `GtkTreeListModel` file navigation.
+- [x] Implement workspace file monitoring and debounced refresh.
+- [x] Add file-tree empty/error states.
+
+## Milestone 3 — high-quality reader
+
+- [x] Parse Markdown with raw HTML disabled.
+- [x] Extract stable headings and source line metadata.
+- [x] Render fenced code with Pygments.
+- [x] Bundle reader HTML/CSS/selection bridge in GResource.
+- [x] Load local images safely and open external links outside WebKit.
+- [x] Implement outline navigation.
+- [x] Track and highlight the active outline heading while scrolling.
+- [x] Implement document search and 75–200% zoom.
+- [x] Add mixed-content renderer fixtures and unit tests.
+
+## Milestone 4 — selection-aware AI
+
+- [x] Detect OpenCode and show a non-blocking unavailable state.
+- [x] Verify the installed OpenCode 1.18.2 JSON protocol.
+- [x] Implement cancellable streaming `OpenCodeGateway`.
+- [x] Build file/heading/excerpt-lines/selection context envelopes.
+- [x] Implement the editorial context rail and source jump-back.
+- [x] Add model selection without storing credentials.
+
+## Milestone 5 — safe AI file changes
+
+- [x] Inject an app-owned, tool-denied agent outside the user workspace.
+- [x] Parse proposed replacements without applying them.
+- [x] Validate workspace containment and symlink policy.
+- [x] Display selected-range unified diffs.
+- [x] Apply accepted changes atomically and provide persistent Undo.
+- [x] Detect stale proposals and external conflicts.
+
+## Milestone 6 — validation and release
+
+- [x] Run unit/integration/accessibility checks.
+- [x] Capture and inspect 640/960/1280/1920 Niri screenshots.
+- [x] Verify light, dark, high-contrast and 200% text states.
+- [x] Add AppStream metadata and native build/install docs.
+- [x] Add a release-quality application icon.
+- [x] Document later Flatpak/OpenCode portal constraints.
+- [x] Add process-level GTK smoke coverage with and without OpenCode.
+
+## Current handoff
+
+Updated 2026-07-16. The repository is initialized on `main` with the GitHub
+`origin` configured. The native reader, workspace navigation, selection-aware
+OpenCode conversation and selected-line diff workflow are functional. There are
+39 passing unit tests plus successful Meson compile/test runs.
+
+OpenCode 1.18.2 must remain isolated through both the injected deny-all agent
+and the private temporary runtime directory. Do not change it back to
+`--dir WORKSPACE`, and never add `--auto`. Real acceptance covered a 640px diff,
+Apply, watcher rerender, `Ctrl+Z` Undo, cancellation, and the missing-OpenCode
+state. The temporary and repository fixtures ended with SHA-256
+`19b19bf7fb9195012fcfe46b841e4da53c01c88a6abc54d6db7d5922738bfe19`.
+
+Active-outline tracking now uses a request-animation-frame scroll bridge,
+validated heading IDs and native `GtkListBox` selection. Long outlines follow
+the active row without stealing focus, and the document-end case selects the
+last heading. `MDREADER_TEST_HEADING=<slug>` opens the outline and scrolls to a
+heading for real-app smoke checks. Acceptance covered 640, 960, 1280 and 1920px
+with `docs/ARCHITECTURE.md`; screenshots are in `/tmp/mdreader-outline-*.png`.
+
+The AI header now shows the selected model and exposes a native radio menu fed
+asynchronously by `opencode models opencode --pure`. The service accepts only
+the current free OpenCode identifiers, resets the session when switching and
+persists only the model ID. `MDREADER_TEST_MODEL_MENU=1` opens the AI pane and
+model menu for real-app smoke checks. Acceptance covered model switching,
+isolated keyfile persistence and 640, 960, 1280 and 1920px layouts; screenshots
+are in `/tmp/mdreader-model-*.png`.
+
+The release icon now includes full-color scalable and symbolic hicolor assets.
+Desktop and AppStream validation are Meson tests, and an isolated DESTDIR install
+plus the real About dialog confirmed GTK resolves the icon. The source render is
+in `/tmp/mdreader-icon-512.png` and the About acceptance screenshot is
+`/tmp/mdreader-icon-about-960.png`.
+
+There are now 39 passing unit tests plus successful compileall, JavaScript
+syntax and four Meson tests. The GTK smoke waits for a real WebKit
+`document-presented` signal and covers both normal and missing-OpenCode startup;
+it skips only when no graphical D-Bus session is available or another MD Reader
+instance already owns the application ID. Preserve the 760sp and 1120sp
+breakpoints unless later Niri screenshots provide evidence to change them.

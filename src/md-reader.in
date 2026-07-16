@@ -1,0 +1,4 @@
+#!@PYTHON@
+from mdreader.bootstrap import main
+
+raise SystemExit(main())

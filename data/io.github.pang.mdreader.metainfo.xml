@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.pang.mdreader</id>
+  <name>MD Reader</name>
+  <summary>Read local Markdown in a focused workspace</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.pang">
+    <name>MD Reader contributors</name>
+  </developer>
+  <description>
+    <p>
+      MD Reader is a read-only Markdown workspace with a file tree, document
+      outline, warm long-form typography and an optional OpenCode assistant.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.pang.mdreader.desktop</launchable>
+  <icon type="stock">io.github.pang.mdreader</icon>
+  <url type="homepage">https://github.com/tjz123psh/my-md-reader</url>
+  <url type="bugtracker">https://github.com/tjz123psh/my-md-reader/issues</url>
+  <categories>
+    <category>Office</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+</component>

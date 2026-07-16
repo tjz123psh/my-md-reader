@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="io.github.pang.mdreader" path="/io/github/pang/mdreader/">
+    <key name="window-width" type="i">
+      <default>1200</default>
+      <summary>Window width</summary>
+    </key>
+    <key name="window-height" type="i">
+      <default>800</default>
+      <summary>Window height</summary>
+    </key>
+    <key name="window-maximized" type="b">
+      <default>false</default>
+      <summary>Whether the window is maximized</summary>
+    </key>
+    <key name="last-workspace" type="s">
+      <default>''</default>
+      <summary>Last workspace path</summary>
+    </key>
+    <key name="last-document" type="s">
+      <default>''</default>
+      <summary>Last document path relative to the workspace</summary>
+    </key>
+    <key name="document-zoom" type="i">
+      <range min="75" max="200" />
+      <default>100</default>
+      <summary>Document zoom percentage</summary>
+    </key>
+    <key name="color-scheme" type="s">
+      <choices>
+        <choice value="system" />
+        <choice value="warm-light" />
+        <choice value="warm-dark" />
+      </choices>
+      <default>'system'</default>
+      <summary>Reader color scheme</summary>
+    </key>
+    <key name="opencode-model" type="s">
+      <default>''</default>
+      <summary>Last selected OpenCode model identifier</summary>
+    </key>
+  </schema>
+</schemalist>

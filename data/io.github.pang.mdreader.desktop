@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=MD Reader
+Comment=Read local Markdown with a focused, warm layout
+Exec=md-reader %F
+Icon=io.github.pang.mdreader
+Terminal=false
+Type=Application
+Categories=Office;Viewer;
+MimeType=text/markdown;
+StartupNotify=true
