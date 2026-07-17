@@ -40,6 +40,7 @@ def run_case(launcher: Path, fixture: Path, *, opencode_missing: bool) -> bool:
             "GSETTINGS_BACKEND": "memory",
             "MDREADER_TEST_QUIT_ON_PRESENT": "1",
             "MDREADER_TEST_SELECT_FIRST": "1",
+            "MDREADER_TEST_CTRL_WHEEL": "1",
         }
     )
     if opencode_missing:
@@ -73,6 +74,14 @@ def run_case(launcher: Path, fixture: Path, *, opencode_missing: bool) -> bool:
         )
         if completed.stderr:
             print(completed.stderr, file=sys.stderr)
+        return False
+    if "MDREADER_TEST_CTRL_WHEEL_OK=105" not in completed.stdout:
+        print(
+            f"MD Reader smoke {label} did not receive Ctrl+wheel zoom",
+            file=sys.stderr,
+        )
+        if completed.stdout:
+            print(completed.stdout, file=sys.stderr)
         return False
     print(f"MD Reader smoke {label}: document presented")
     return True

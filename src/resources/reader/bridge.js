@@ -61,14 +61,15 @@
     timer = window.setTimeout(reportSelection, 80);
   });
 
+  const headings = Array.from(document.querySelectorAll(
+    "h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]",
+  ));
   let activeHeadingId = null;
+  let headingDelay = 0;
   let scrollFrame = 0;
 
   const reportActiveHeading = () => {
     scrollFrame = 0;
-    const headings = document.querySelectorAll(
-      "h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]",
-    );
     const probe = Math.min(160, Math.max(64, window.innerHeight * 0.18));
     let active = headings.length ? headings[0] : null;
     const atDocumentEnd = (
@@ -78,9 +79,16 @@
     if (atDocumentEnd && headings.length) {
       active = headings[headings.length - 1];
     } else {
-      for (const heading of headings) {
-        if (heading.getBoundingClientRect().top > probe) break;
-        active = heading;
+      let low = 0;
+      let high = headings.length - 1;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        if (headings[middle].getBoundingClientRect().top <= probe) {
+          active = headings[middle];
+          low = middle + 1;
+        } else {
+          high = middle - 1;
+        }
       }
     }
 
@@ -91,13 +99,16 @@
   };
 
   const scheduleActiveHeading = () => {
-    if (scrollFrame) return;
-    scrollFrame = window.requestAnimationFrame(reportActiveHeading);
+    if (headingDelay || scrollFrame) return;
+    headingDelay = window.setTimeout(() => {
+      headingDelay = 0;
+      scrollFrame = window.requestAnimationFrame(reportActiveHeading);
+    }, 72);
   };
 
   window.addEventListener("scroll", scheduleActiveHeading, { passive: true });
   window.addEventListener("resize", scheduleActiveHeading, { passive: true });
-  scheduleActiveHeading();
+  scrollFrame = window.requestAnimationFrame(reportActiveHeading);
 
   const zoomBounds = (percent) => Math.max(75, Math.min(200, Number(percent) || 100));
 
@@ -132,8 +143,38 @@
     return bounded;
   };
 
+  const zoomStep = 5;
+  const zoomWheelThreshold = 24;
   let zoomWheelDelta = 0;
   let zoomWheelDirection = 0;
+  let pendingZoomSteps = 0;
+  let zoomFrame = 0;
+  let zoomAnchorY = null;
+
+  const flushZoomStep = () => {
+    zoomFrame = 0;
+    const direction = Math.sign(pendingZoomSteps);
+    if (!direction) return;
+    pendingZoomSteps -= direction;
+
+    const current = currentZoom();
+    const requested = zoomBounds(current + direction * zoomStep);
+    if (requested !== current) {
+      setZoom(requested, zoomAnchorY);
+      window.webkit?.messageHandlers?.zoom?.postMessage(JSON.stringify({
+        percent: requested,
+        anchorY: zoomAnchorY,
+      }));
+    }
+    if (pendingZoomSteps) {
+      zoomFrame = window.requestAnimationFrame(flushZoomStep);
+    }
+  };
+
+  const scheduleZoomStep = () => {
+    if (!zoomFrame) zoomFrame = window.requestAnimationFrame(flushZoomStep);
+  };
+
   window.addEventListener("wheel", (event) => {
     if (!event.ctrlKey) return;
     event.preventDefault();
@@ -152,23 +193,25 @@
       zoomWheelDirection = direction;
     }
     zoomWheelDelta += Math.abs(delta);
-    if (zoomWheelDelta < 40) return;
+    if (zoomWheelDelta < zoomWheelThreshold) return;
     zoomWheelDelta = 0;
-
-    const requested = zoomBounds(currentZoom() + direction * 10);
-    if (requested === currentZoom()) return;
-    setZoom(requested, event.clientY);
-    window.webkit?.messageHandlers?.zoom?.postMessage(JSON.stringify({
-      percent: requested,
-      anchorY: event.clientY,
-    }));
+    if (pendingZoomSteps && Math.sign(pendingZoomSteps) !== direction) {
+      pendingZoomSteps = 0;
+    }
+    pendingZoomSteps = Math.max(-6, Math.min(6, pendingZoomSteps + direction));
+    zoomAnchorY = event.clientY;
+    scheduleZoomStep();
   }, { passive: false });
+
+  const motionBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? "auto"
+    : "smooth";
 
   window.mdReader = {
     setZoom,
     scrollToHeading(id) {
       const target = document.getElementById(id);
-      if (target) target.scrollIntoView({ block: "start", behavior: "auto" });
+      if (target) target.scrollIntoView({ block: "start", behavior: motionBehavior });
     },
     scrollToSource(line) {
       const target = Array.from(document.querySelectorAll("[data-source-start]")).find((node) => {
@@ -176,7 +219,7 @@
         const end = Number.parseInt(node.dataset.sourceEnd || "0", 10);
         return start <= line && line <= end;
       });
-      if (target) target.scrollIntoView({ block: "center", behavior: "auto" });
+      if (target) target.scrollIntoView({ block: "center", behavior: motionBehavior });
     },
     clearSelection() {
       window.getSelection()?.removeAllRanges();

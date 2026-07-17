@@ -144,6 +144,12 @@ class DocumentView(Gtk.Box):
     def scroll_to_source(self, line: int) -> None:
         self._evaluate(f"window.mdReader?.scrollToSource({int(line)});")
 
+    def dispatch_ctrl_wheel_for_test(self) -> None:
+        self._evaluate(
+            "window.dispatchEvent(new WheelEvent('wheel',"
+            "{ctrlKey:true,deltaY:-100,clientY:240,cancelable:true}));"
+        )
+
     def _create_web_view(self) -> None:
         manager = WebKit.UserContentManager()
         manager.register_script_message_handler("selection", None)
@@ -157,7 +163,7 @@ class DocumentView(Gtk.Box):
         settings.set_enable_javascript(True)
         settings.set_javascript_can_open_windows_automatically(False)
         settings.set_enable_developer_extras(False)
-        settings.set_enable_smooth_scrolling(False)
+        settings.set_enable_smooth_scrolling(True)
         # WebKitGTK's DMA-BUF renderer can leave unpainted white tiles on
         # Wayland/NVIDIA while scrolling long documents. A reading surface
         # favors reliable text painting over accelerated compositing.

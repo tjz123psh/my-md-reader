@@ -75,7 +75,7 @@ This is the live project state. Update it after each coherent milestone.
 Updated 2026-07-17. The repository is initialized on `main` with the GitHub
 `origin` configured. The native reader, workspace navigation, selection-aware
 OpenCode conversation and selected-line diff workflow are functional. There are
-53 passing unit tests plus successful Meson compile/test runs.
+54 passing unit tests plus successful Meson compile/test runs.
 
 OpenCode 1.18.2 must remain isolated through both the injected deny-all agent
 and the private temporary runtime directory. Do not change it back to
@@ -105,7 +105,7 @@ plus the real About dialog confirmed GTK resolves the icon. The source render is
 in `/tmp/mdreader-icon-512.png` and the About acceptance screenshot is
 `/tmp/mdreader-icon-about-960.png`.
 
-There are now 53 passing unit tests plus successful compileall, JavaScript
+There are now 54 passing unit tests plus successful compileall, JavaScript
 syntax and four Meson tests. The GTK smoke waits for a real WebKit
 `document-presented` signal and covers both normal and missing-OpenCode startup;
 it skips only when no graphical D-Bus session is available or another MD Reader
@@ -145,13 +145,21 @@ now sets `WebKit.HardwareAccelerationPolicy.NEVER`. Dark-mode checks at all
 four Niri widths are in `/tmp/mdreader-software-{640,960,1280,1920}.png`;
 `/tmp/mdreader-software-image.png` confirms local images still render.
 
-Reader scrolling now uses direct native WebKit scrolling with CSS and WebKit
-smooth-scroll animation disabled, which avoids delayed software-rendered
-frames while retaining precise touchpad deltas. `Ctrl+mouse wheel` is the only
-zoom shortcut: the page applies 10% steps immediately to the body, preserves
-the pointer-relative reading position, and reports the bounded 75–200% value
-to GTK for persistence. The broken `Ctrl++`, `Ctrl+-` and `Ctrl+0`
-accelerators were removed. AI streaming renders its first text immediately,
-then throttles full Markdown rebuilds and coalesces scroll-to-bottom work.
-Acceptance at 640, 960, 1280 and 1920px is recorded in
-`/tmp/mdreader-scroll-{640,960,1280,1920}.png`.
+Reader scrolling keeps native WebKit smooth scrolling while the selection
+bridge caches headings, limits active-outline work to roughly every 72 ms and
+uses binary search instead of scanning every heading on every frame.
+`Ctrl+mouse wheel` remains the only zoom shortcut: 5-point changes are queued
+by animation frame, preserve the pointer-relative position and debounce
+GSettings persistence. A real WebKit wheel event now verifies 100% → 105% in
+the GTK process smoke test. AI streaming still renders its first text
+immediately, throttles full Markdown rebuilds and coalesces scroll-to-bottom
+work.
+
+The AI panel now disables nested window title buttons and uses an explicit
+Hide action, verified to preserve the active application window. Ask and Edit
+are visible exclusive modes; Edit stays disabled without a selection and
+continues through the reviewed diff boundary. The composer is a bounded
+multiline prompt field with Enter-to-send and Shift+Enter newline behavior.
+Clean Niri acceptance at 640, 960, 1280 and 1920px is in
+`/tmp/mdreader-smooth-clean/`; the settled 1280 transition check is
+`settled-1280.png` in the same directory.

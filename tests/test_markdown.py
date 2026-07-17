@@ -104,6 +104,8 @@ class MarkdownRendererTests(unittest.TestCase):
     def test_reader_reports_active_outline_heading(self) -> None:
         self.assertIn("messageHandlers?.outline", self.rendered.html)
         self.assertIn("requestAnimationFrame(reportActiveHeading)", self.rendered.html)
+        self.assertIn("window.setTimeout(() =>", self.rendered.html)
+        self.assertIn("Math.floor((low + high) / 2)", self.rendered.html)
         self.assertIn("atDocumentEnd", self.rendered.html)
 
     def test_ctrl_wheel_zooms_without_intercepting_plain_scrolling(self) -> None:
@@ -115,7 +117,9 @@ class MarkdownRendererTests(unittest.TestCase):
     def test_zoom_updates_body_and_uses_an_anchored_scroll_position(self) -> None:
         self.assertIn('target.style.setProperty("--reader-zoom"', self.rendered.html)
         self.assertIn("oldAnchor / oldHeight", self.rendered.html)
-        self.assertNotIn('behavior: "smooth"', self.rendered.html)
+        self.assertIn("const zoomStep = 5", self.rendered.html)
+        self.assertIn("requestAnimationFrame(flushZoomStep)", self.rendered.html)
+        self.assertIn('behavior: "auto"', self.rendered.html)
 
     def test_keyboard_zoom_accelerators_are_not_registered(self) -> None:
         application = (
@@ -124,6 +128,18 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertNotIn('"win.zoom-in":', application)
         self.assertNotIn('"win.zoom-out":', application)
         self.assertNotIn('"win.zoom-reset":', application)
+
+    def test_ai_panel_has_safe_close_modes_and_multiline_prompt(self) -> None:
+        source = (
+            Path(__file__).parents[1] / "src/mdreader/widgets/ai_panel.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("show_end_title_buttons=False", source)
+        self.assertIn('action_name="win.hide-ai"', source)
+        self.assertIn("Adw.ToggleGroup()", source)
+        self.assertIn('name="ask"', source)
+        self.assertIn('name="edit"', source)
+        self.assertIn("Gtk.TextView(", source)
+        self.assertNotIn("self._edit_toggle", source)
 
     def test_remote_images_are_blocked_by_token_policy_and_csp(self) -> None:
         self.assertIn('src="about:blank"', self.rendered.html)

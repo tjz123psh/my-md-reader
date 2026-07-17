@@ -8,9 +8,10 @@ from pathlib import Path
 import gi
 
 gi.require_version("Adw", "1")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gio", "2.0")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, Gio, GLib, Gtk, Pango
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 from mdreader.models import DocumentSelection
 from mdreader.services.ai_markdown import AiMarkdownBlock, AiMarkdownRenderer
@@ -59,7 +60,21 @@ class AiPanel(Gtk.Box):
         title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         title_box.append(header_title)
         title_box.append(self._model_label)
-        header = Adw.HeaderBar(title_widget=title_box)
+        header = Adw.HeaderBar(
+            title_widget=title_box,
+            show_start_title_buttons=False,
+            show_end_title_buttons=False,
+        )
+
+        close_button = Gtk.Button(
+            icon_name="window-close-symbolic",
+            action_name="win.hide-ai",
+        )
+        close_button.set_tooltip_text("Hide AI assistant")
+        close_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Hide AI assistant"]
+        )
+        header.pack_end(close_button)
 
         self._model_menu = Gio.Menu()
         self._model_button = Gtk.MenuButton(
@@ -79,6 +94,25 @@ class AiPanel(Gtk.Box):
         content.set_margin_end(12)
         content.set_margin_top(12)
         content.set_margin_bottom(12)
+
+        self._mode_group = Adw.ToggleGroup()
+        self._ask_mode = Adw.Toggle(
+            name="ask",
+            label="Ask",
+            icon_name="chat-symbolic",
+            tooltip="Discuss the current document without changing files",
+        )
+        self._edit_mode = Adw.Toggle(
+            name="edit",
+            label="Edit",
+            icon_name="document-edit-symbolic",
+            tooltip="Propose a reviewed change to the selected lines",
+        )
+        self._mode_group.add(self._ask_mode)
+        self._mode_group.add(self._edit_mode)
+        self._mode_group.set_active_name("ask")
+        self._mode_group.connect("notify::active-name", self._on_mode_changed)
+        content.append(self._mode_group)
 
         self._context_revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
@@ -124,34 +158,89 @@ class AiPanel(Gtk.Box):
         )
         self._transcript.append(self._status)
 
-        composer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self._edit_toggle = Gtk.ToggleButton(icon_name="document-edit-symbolic")
-        self._edit_toggle.set_tooltip_text("Propose a change to the selected lines")
-        self._edit_toggle.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Propose an edit to selected lines"]
-        )
-        self._edit_toggle.connect("toggled", self._on_edit_toggled)
-        composer.append(self._edit_toggle)
-        self._entry = Gtk.Entry(
+        composer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self._prompt_buffer = Gtk.TextBuffer()
+        self._prompt_buffer.connect("changed", self._on_prompt_changed)
+        self._prompt_view = Gtk.TextView(
+            buffer=self._prompt_buffer,
             hexpand=True,
-            placeholder_text="Ask about this document…",
+            wrap_mode=Gtk.WrapMode.WORD_CHAR,
             sensitive=False,
         )
-        self._entry.connect("activate", self._on_send_requested)
-        composer.append(self._entry)
+        self._prompt_view.add_css_class("ai-prompt")
+        self._prompt_view.set_top_margin(10)
+        self._prompt_view.set_bottom_margin(10)
+        self._prompt_view.set_left_margin(10)
+        self._prompt_view.set_right_margin(10)
+        self._prompt_view.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["AI prompt"]
+        )
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_prompt_key_pressed)
+        self._prompt_view.add_controller(key_controller)
 
-        self._send_button = Gtk.Button(icon_name="mail-send-symbolic", sensitive=False)
+        prompt_scroll = Gtk.ScrolledWindow(
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            min_content_height=74,
+            max_content_height=150,
+            propagate_natural_height=True,
+        )
+        prompt_scroll.add_css_class("ai-prompt-frame")
+        prompt_scroll.set_child(self._prompt_view)
+        prompt_overlay = Gtk.Overlay()
+        prompt_overlay.set_child(prompt_scroll)
+        self._prompt_placeholder = Gtk.Label(
+            label="Ask about this document or add instructions…",
+            xalign=0,
+            yalign=0,
+            wrap=True,
+        )
+        self._prompt_placeholder.add_css_class("dimmed")
+        self._prompt_placeholder.add_css_class("ai-prompt-placeholder")
+        self._prompt_placeholder.set_can_target(False)
+        self._prompt_placeholder.set_margin_start(12)
+        self._prompt_placeholder.set_margin_end(12)
+        self._prompt_placeholder.set_margin_top(11)
+        prompt_overlay.add_overlay(self._prompt_placeholder)
+        composer.append(prompt_overlay)
+
+        composer_actions = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=6,
+        )
+        composer_hint = Gtk.Label(
+            label="Enter to send · Shift+Enter for a new line",
+            xalign=0,
+            hexpand=True,
+            ellipsize=Pango.EllipsizeMode.END,
+        )
+        composer_hint.add_css_class("caption")
+        composer_hint.add_css_class("dimmed")
+        composer_actions.append(composer_hint)
+
+        self._send_button = Gtk.Button(
+            icon_name="mail-send-symbolic",
+            sensitive=False,
+        )
         self._send_button.add_css_class("suggested-action")
         self._send_button.set_tooltip_text("Send message")
-        self._send_button.update_property([Gtk.AccessibleProperty.LABEL], ["Send message"])
+        self._send_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Send message"]
+        )
         self._send_button.connect("clicked", self._on_send_requested)
-        composer.append(self._send_button)
+        composer_actions.append(self._send_button)
 
-        self._cancel_button = Gtk.Button(icon_name="process-stop-symbolic", visible=False)
+        self._cancel_button = Gtk.Button(
+            icon_name="process-stop-symbolic",
+            visible=False,
+        )
         self._cancel_button.set_tooltip_text("Cancel response")
-        self._cancel_button.update_property([Gtk.AccessibleProperty.LABEL], ["Cancel response"])
+        self._cancel_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Cancel response"]
+        )
         self._cancel_button.connect("clicked", lambda *_: self._on_cancel())
-        composer.append(self._cancel_button)
+        composer_actions.append(self._cancel_button)
+        composer.append(composer_actions)
         content.append(composer)
 
         toolbar = Adw.ToolbarView(content=content)
@@ -195,8 +284,10 @@ class AiPanel(Gtk.Box):
     def set_selection(self, selection: DocumentSelection) -> None:
         self._selection = selection
         if selection.is_empty:
-            self._edit_toggle.set_active(False)
+            if self._mode_group.get_active_name() == "edit":
+                self._mode_group.set_active_name("ask")
             self._context_revealer.set_reveal_child(False)
+            self._update_composer()
             return
 
         location = str(self._document) if self._document else "Current document"
@@ -207,6 +298,7 @@ class AiPanel(Gtk.Box):
         self._context_meta.set_label(location)
         self._context_quote.set_label(selection.text)
         self._context_revealer.set_reveal_child(True)
+        self._update_composer()
 
     def append_user(self, text: str) -> None:
         self._hide_status()
@@ -283,31 +375,51 @@ class AiPanel(Gtk.Box):
         self._scroll_to_bottom()
 
     def focus_composer(self) -> None:
-        self._entry.grab_focus()
+        self._prompt_view.grab_focus()
 
     def popup_model_menu(self) -> None:
         self._model_button.popup()
 
     def _on_send_requested(self, _widget: Gtk.Widget) -> None:
-        text = self._entry.get_text().strip()
+        text = self._prompt_buffer.get_text(
+            self._prompt_buffer.get_start_iter(),
+            self._prompt_buffer.get_end_iter(),
+            False,
+        ).strip()
         if not text or self._running or not self._document:
             return
-        edit_mode = self._edit_toggle.get_active()
-        self._entry.set_text("")
-        if edit_mode:
-            self._edit_toggle.set_active(False)
+        edit_mode = self._mode_group.get_active_name() == "edit"
+        self._prompt_buffer.set_text("")
         self._on_send(text, edit_mode)
 
-    def _on_edit_toggled(self, button: Gtk.ToggleButton) -> None:
-        if button.get_active() and self._selection.is_empty:
-            button.set_active(False)
-            self.show_error("Select the lines to change before proposing an edit")
+    def _on_mode_changed(self, group: Adw.ToggleGroup, _param: object) -> None:
+        edit_mode = group.get_active_name() == "edit"
+        if edit_mode and self._selection.is_empty:
+            group.set_active_name("ask")
             return
-        self._entry.set_placeholder_text(
-            "Describe the selected-line change…"
-            if button.get_active()
-            else "Ask about this document…"
+        self._prompt_placeholder.set_label(
+            "Describe the change to the selected lines…"
+            if edit_mode
+            else "Ask about this document or add instructions…"
         )
+
+    def _on_prompt_changed(self, buffer: Gtk.TextBuffer) -> None:
+        self._prompt_placeholder.set_visible(buffer.get_char_count() == 0)
+        self._update_composer()
+
+    def _on_prompt_key_pressed(
+        self,
+        _controller: Gtk.EventControllerKey,
+        keyval: int,
+        _keycode: int,
+        state: Gdk.ModifierType,
+    ) -> bool:
+        if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            return False
+        if state & Gdk.ModifierType.SHIFT_MASK:
+            return False
+        self._on_send_requested(self._prompt_view)
+        return True
 
     def _on_context_clicked(self, _button: Gtk.Button) -> None:
         if self._selection.start_line:
@@ -321,9 +433,12 @@ class AiPanel(Gtk.Box):
 
     def _update_composer(self) -> None:
         enabled = self._available and self._document is not None and not self._running
-        self._entry.set_sensitive(enabled)
-        self._send_button.set_sensitive(enabled)
-        self._edit_toggle.set_sensitive(enabled)
+        self._prompt_view.set_sensitive(enabled)
+        self._send_button.set_sensitive(
+            enabled and self._prompt_buffer.get_char_count() > 0
+        )
+        self._mode_group.set_sensitive(enabled)
+        self._edit_mode.set_enabled(enabled and not self._selection.is_empty)
         self._model_button.set_sensitive(
             self._available and bool(self._models) and not self._running
         )

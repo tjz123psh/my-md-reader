@@ -30,6 +30,20 @@
   min-height: 24px;
 }
 
+.ai-prompt-frame {
+  background: @view_bg_color;
+  border: 1px solid alpha(@view_fg_color, 0.16);
+  border-radius: 10px;
+}
+
+.ai-prompt {
+  background: transparent;
+}
+
+.ai-prompt-placeholder {
+  color: alpha(@view_fg_color, 0.55);
+}
+
 .ai-markdown-heading {
   color: @accent_color;
 }

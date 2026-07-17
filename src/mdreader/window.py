@@ -65,7 +65,9 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._model_load_generation = 0
         self._scan_generation = 0
         self._test_source_line = 0
+        self._test_ctrl_wheel = False
         self._zoom = settings.get_int("document-zoom")
+        self._zoom_save_source_id = 0
 
         self.set_default_size(
             settings.get_int("window-width"), settings.get_int("window-height")
@@ -107,6 +109,8 @@ class MdReaderWindow(Adw.ApplicationWindow):
             enable_show_gesture=True,
             enable_hide_gesture=True,
         )
+        self._ai_split.connect("notify::collapsed", self._sync_ai_button_state)
+        self._ai_split.connect("notify::show-sidebar", self._sync_ai_button_state)
         self._library_split = Adw.OverlaySplitView(
             content=self._ai_split,
             sidebar=self._library,
@@ -134,6 +138,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
 
     def do_close_request(self) -> bool:
         self._model_load_generation += 1
+        self._flush_zoom_setting()
         if self._opencode is not None:
             self._opencode.close()
         if self._watcher is not None:
@@ -192,6 +197,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
             "open-folder": self._on_open_folder,
             "toggle-library": self._on_toggle_library,
             "toggle-ai": self._on_toggle_ai,
+            "hide-ai": self._on_hide_ai,
             "find": self._on_find,
             "zoom-in": lambda *_: self._change_zoom(10),
             "zoom-out": lambda *_: self._change_zoom(-10),
@@ -225,7 +231,6 @@ class MdReaderWindow(Adw.ApplicationWindow):
         standard.add_setter(self._ai_split, "pin-sidebar", False)
         standard.add_setter(self._ai_split, "show-sidebar", False)
         standard.add_setter(self.files_button, "visible", True)
-        standard.add_setter(self.ai_button, "visible", True)
         self.add_breakpoint(standard)
 
         compact = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 760sp"))
@@ -238,7 +243,6 @@ class MdReaderWindow(Adw.ApplicationWindow):
         compact.add_setter(self._ai_split, "pin-sidebar", False)
         compact.add_setter(self._ai_split, "show-sidebar", False)
         compact.add_setter(self.files_button, "visible", True)
-        compact.add_setter(self.ai_button, "visible", True)
         compact.add_setter(self._library_split, "max-sidebar-width", 520.0)
         compact.add_setter(self._library_split, "sidebar-width-fraction", 0.90)
         compact.add_setter(self._ai_split, "max-sidebar-width", 600.0)
@@ -247,7 +251,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
 
         # Wide mode starts with both panes pinned; breakpoints reveal their buttons.
         self.files_button.set_visible(False)
-        self.ai_button.set_visible(False)
+        self._sync_ai_button_state()
 
     def _on_open_folder(self, _action: Gio.SimpleAction, _parameter: object) -> None:
         dialog = Gtk.FileDialog(title="Open Markdown Folder", modal=True)
@@ -270,6 +274,14 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._ai_split.set_show_sidebar(showing)
         if showing:
             self._ai.focus_composer()
+
+    def _on_hide_ai(self, _action: Gio.SimpleAction, _parameter: object) -> None:
+        self._ai_split.set_show_sidebar(False)
+
+    def _sync_ai_button_state(self, *_args: object) -> None:
+        self.ai_button.set_visible(
+            self._ai_split.get_collapsed() or not self._ai_split.get_show_sidebar()
+        )
 
     def _on_find(self, _action: Gio.SimpleAction, _parameter: object) -> None:
         enabled = not self._search_bar.get_search_mode()
@@ -554,6 +566,9 @@ pacstrap -K /mnt base linux linux-firmware
             source_line = self._test_source_line
             self._test_source_line = 0
             GLib.timeout_add(200, self._scroll_smoke_source, source_line)
+        if os.environ.pop("MDREADER_TEST_CTRL_WHEEL", "") == "1":
+            self._test_ctrl_wheel = True
+            self._document.dispatch_ctrl_wheel_for_test()
         if os.environ.pop("MDREADER_TEST_QUIT_ON_PRESENT", "") == "1":
             GLib.timeout_add(200, self._quit_presented_smoke)
 
@@ -758,17 +773,48 @@ pacstrap -K /mnt base linux linux-firmware
     def _on_zoom_requested(
         self, _view: DocumentView, zoom: int, _anchor_y: float
     ) -> None:
-        self._set_zoom(zoom, update_document=False, announce=False)
+        self._set_zoom(
+            zoom,
+            update_document=False,
+            announce=False,
+            defer_persist=True,
+        )
+        if self._test_ctrl_wheel:
+            self._test_ctrl_wheel = False
+            print(f"MDREADER_TEST_CTRL_WHEEL_OK={self._zoom}", flush=True)
 
     def _set_zoom(
-        self, zoom: int, *, update_document: bool = True, announce: bool = True
+        self,
+        zoom: int,
+        *,
+        update_document: bool = True,
+        announce: bool = True,
+        defer_persist: bool = False,
     ) -> None:
         self._zoom = max(75, min(200, zoom))
-        self._settings.set_int("document-zoom", self._zoom)
+        if defer_persist:
+            if self._zoom_save_source_id:
+                GLib.source_remove(self._zoom_save_source_id)
+            self._zoom_save_source_id = GLib.timeout_add(
+                180, self._save_zoom_setting
+            )
+        else:
+            self._flush_zoom_setting()
         if update_document:
             self._document.set_zoom(self._zoom)
         if announce:
             self._show_toast(f"Document zoom: {self._zoom}%")
+
+    def _save_zoom_setting(self) -> bool:
+        self._zoom_save_source_id = 0
+        self._settings.set_int("document-zoom", self._zoom)
+        return GLib.SOURCE_REMOVE
+
+    def _flush_zoom_setting(self) -> None:
+        if self._zoom_save_source_id:
+            GLib.source_remove(self._zoom_save_source_id)
+            self._zoom_save_source_id = 0
+        self._settings.set_int("document-zoom", self._zoom)
 
     def _show_toast(self, message: str) -> None:
         self.toast_overlay.add_toast(Adw.Toast(title=message, timeout=3))

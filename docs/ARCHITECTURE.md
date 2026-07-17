@@ -89,8 +89,9 @@ finds the first and last mapped ancestors and sends this structured payload:
 }
 ```
 
-The same bundled bridge tracks the active heading at most once per animation
-frame and reports only heading-ID changes. GTK validates the message, selects
+The same bundled bridge caches the heading nodes, limits active-heading work to
+roughly every 72 ms and locates the current heading with a binary search. It
+reports only heading-ID changes. GTK validates the message, selects
 the corresponding native outline row and scrolls long outlines without moving
 keyboard focus away from the document. When the document is at its end, the
 last heading remains reachable even if it cannot cross the normal viewport
@@ -139,6 +140,13 @@ quotes and tables retain structure; fenced code uses Pygments colors. An
 `AdwSpinner` labeled “Thinking…” appears as soon as a request is accepted and
 is removed at completion. It indicates process state and never exposes or
 fabricates hidden model reasoning.
+
+The AI composer exposes explicit Ask and Edit modes. Ask is read-only; Edit is
+disabled until source lines are selected and can only produce the existing
+reviewed diff proposal. A bounded multiline prompt field sends with Enter and
+inserts a newline with Shift+Enter. The nested AI header disables window title
+buttons and owns a separate Hide action, so closing the panel cannot close the
+application window.
 
 OpenCode never runs with `--auto`. The gateway injects an app-owned agent via
 `OPENCODE_CONFIG_CONTENT`, sets `OPENCODE_PERMISSION={"*":"deny"}`, disables
@@ -218,7 +226,7 @@ GSettings stores preferences and lightweight session state:
 
 - window size and maximized state outside compositor overrides;
 - last workspace URI and last document URI;
-- document zoom (default 100, range 75–200, step 10);
+- document zoom (default 100, range 75–200, 5-point wheel steps);
 - a reserved warm light / warm dark / follow-system choice (the current UI
   follows the system);
 - last selected OpenCode model identifier, with no credentials.
@@ -228,9 +236,10 @@ by OpenCode/provider storage. Chat transcripts containing document text are not
 persisted until a clear retention policy exists.
 
 Document zoom is initiated by `Ctrl+mouse wheel` inside the WebKit surface.
-The page applies the new body zoom immediately around the pointer, then sends
-the validated percentage to GTK for GSettings persistence. Plain wheel and
-touchpad scrolling remain on WebKit's native event path.
+The page queues 5-point changes by animation frame, applies the new body zoom
+around the pointer, then sends the validated percentage to GTK. GTK debounces
+GSettings persistence until the gesture settles. Plain wheel and touchpad
+scrolling remain on WebKit's native smooth-scrolling path.
 
 ## 6. Failure behavior
 

@@ -155,6 +155,12 @@ Breakpoints are initially 760sp and 1120sp.
 - `Escape`: close an overlay or clear selection context, depending on focus.
 - Clicking an outline entry scrolls to the heading without reloading.
 - The AI header shows the current model; its menu lists free OpenCode models.
+- The AI header close control hides only the assistant; it is not a window
+  title button.
+- Ask is a read-only discussion mode. Edit is an explicit selected-line diff
+  proposal mode and remains unavailable without a selection.
+- The AI prompt accepts multiple lines; Enter sends and Shift+Enter adds a
+  line break.
 - External links open outside the application.
 - Zoom is visible as a compact percentage in the reader menu/status popover,
   not as a permanent slider.
