@@ -152,6 +152,12 @@ class DocumentView(Gtk.Box):
         settings.set_enable_javascript(True)
         settings.set_javascript_can_open_windows_automatically(False)
         settings.set_enable_developer_extras(False)
+        # WebKitGTK's DMA-BUF renderer can leave unpainted white tiles on
+        # Wayland/NVIDIA while scrolling long documents. A reading surface
+        # favors reliable text painting over accelerated compositing.
+        settings.set_hardware_acceleration_policy(
+            WebKit.HardwareAccelerationPolicy.NEVER
+        )
         self._web_view.connect("decide-policy", self._on_decide_policy)
         self._web_view.connect("load-changed", self._on_load_changed)
         self._stack.add_named(self._web_view, "reader")

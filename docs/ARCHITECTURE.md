@@ -63,6 +63,12 @@ injecting scripts into the privileged selection bridge. Remote scripts,
 styles and fonts are never loaded. External links open through the desktop
 URI launcher rather than navigating the reading surface.
 
+The reading WebView uses WebKitGTK's `HardwareAccelerationPolicy.NEVER`.
+On the recorded Wayland/Niri and NVIDIA environment, the DMA-BUF renderer
+reproducibly left large unpainted white tiles after scrolling long documents.
+Software compositing kept the same layout and image support while rendering
+every tested tile reliably at 640, 960, 1280 and 1920 logical pixels.
+
 Standard relative image paths may traverse parent directories only while the
 resolved target remains inside the canonical workspace. Obsidian image embeds
 such as `![[Pasted image.png|617]]` are rewritten without changing source-line

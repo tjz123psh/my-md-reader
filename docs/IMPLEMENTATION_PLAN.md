@@ -137,3 +137,10 @@ lists, tables, quotes, links and Pygments-colored code. An accessible
 `/tmp/mdreader-ai-1280.png` and `/tmp/mdreader-ai-1920.png`, with Thinking and
 Obsidian image checks in `/tmp/mdreader-ai-thinking-960.png` and
 `/tmp/mdreader-obsidian-image-final.png`.
+
+Long-document white tiles were traced to WebKitGTK DMA-BUF compositing rather
+than Markdown, CSS or images. The same source line failed with default
+acceleration and rendered completely with software compositing, so the reader
+now sets `WebKit.HardwareAccelerationPolicy.NEVER`. Dark-mode checks at all
+four Niri widths are in `/tmp/mdreader-software-{640,960,1280,1920}.png`;
+`/tmp/mdreader-software-image.png` confirms local images still render.
