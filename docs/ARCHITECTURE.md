@@ -141,12 +141,13 @@ quotes and tables retain structure; fenced code uses Pygments colors. An
 is removed at completion. It indicates process state and never exposes or
 fabricates hidden model reasoning.
 
-The AI composer exposes explicit Ask and Edit modes. Ask is read-only; Edit is
-disabled until source lines are selected and can only produce the existing
-reviewed diff proposal. A bounded multiline prompt field sends with Enter and
-inserts a newline with Shift+Enter. The nested AI header disables window title
-buttons and owns a separate Hide action, so closing the panel cannot close the
-application window.
+The AI composer exposes explicit Ask and Edit modes. Ask is read-only. Edit can
+be selected before source lines exist, shows an inline selection requirement,
+and enables sending only after lines are selected; it can still only produce
+the existing reviewed diff proposal. A bounded multiline prompt field leaves
+normal input and Enter to the input method and sends only with Ctrl+Enter. The
+nested AI header disables window title buttons and owns a separate Hide action,
+so closing the panel cannot close the application window.
 
 OpenCode never runs with `--auto`. The gateway injects an app-owned agent via
 `OPENCODE_CONFIG_CONTENT`, sets `OPENCODE_PERMISSION={"*":"deny"}`, disables
@@ -236,10 +237,16 @@ by OpenCode/provider storage. Chat transcripts containing document text are not
 persisted until a clear retention policy exists.
 
 Document zoom is initiated by `Ctrl+mouse wheel` inside the WebKit surface.
-The page queues 5-point changes by animation frame, applies the new body zoom
-around the pointer, then sends the validated percentage to GTK. GTK debounces
-GSettings persistence until the gesture settles. Plain wheel and touchpad
-scrolling remain on WebKit's native smooth-scrolling path.
+The page spreads each 5-point gesture across three animation frames, applies
+the body zoom around the pointer, then sends the validated percentage to GTK.
+GTK debounces GSettings persistence until the gesture settles. High-resolution
+touchpad input remains native; discrete mouse-wheel input uses a short
+time-based interpolation so long documents move smoothly without changing the
+hardware-acceleration safety policy.
+
+Document search is a compact popover anchored to the left side of the main
+header. It does not install a window-level key-capture widget, so typing and
+IME preedit inside the AI prompt remain owned by the focused `GtkTextView`.
 
 ## 6. Failure behavior
 

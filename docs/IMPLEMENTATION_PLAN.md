@@ -75,7 +75,7 @@ This is the live project state. Update it after each coherent milestone.
 Updated 2026-07-17. The repository is initialized on `main` with the GitHub
 `origin` configured. The native reader, workspace navigation, selection-aware
 OpenCode conversation and selected-line diff workflow are functional. There are
-54 passing unit tests plus successful Meson compile/test runs.
+55 passing unit tests plus successful Meson compile/test runs.
 
 OpenCode 1.18.2 must remain isolated through both the injected deny-all agent
 and the private temporary runtime directory. Do not change it back to
@@ -105,7 +105,7 @@ plus the real About dialog confirmed GTK resolves the icon. The source render is
 in `/tmp/mdreader-icon-512.png` and the About acceptance screenshot is
 `/tmp/mdreader-icon-about-960.png`.
 
-There are now 54 passing unit tests plus successful compileall, JavaScript
+There are now 55 passing unit tests plus successful compileall, JavaScript
 syntax and four Meson tests. The GTK smoke waits for a real WebKit
 `document-presented` signal and covers both normal and missing-OpenCode startup;
 it skips only when no graphical D-Bus session is available or another MD Reader
@@ -157,9 +157,18 @@ work.
 
 The AI panel now disables nested window title buttons and uses an explicit
 Hide action, verified to preserve the active application window. Ask and Edit
-are visible exclusive modes; Edit stays disabled without a selection and
-continues through the reviewed diff boundary. The composer is a bounded
-multiline prompt field with Enter-to-send and Shift+Enter newline behavior.
+are visible exclusive modes. Edit can be selected without a source selection,
+shows an inline requirement and enables send once lines are selected, while
+continuing through the reviewed diff boundary. The composer is a bounded
+multiline prompt field that leaves normal typing and Enter to the IME and uses
+Ctrl+Enter to send.
 Clean Niri acceptance at 640, 960, 1280 and 1920px is in
-`/tmp/mdreader-smooth-clean/`; the settled 1280 transition check is
+`/tmp/mdreader-ime-search-final/`; the settled 1280 transition check is
 `settled-1280.png` in the same directory.
+
+The full-width `GtkSearchBar` and its window-level key capture were removed;
+document search now opens from a compact popover button at the left side of the
+main header. Discrete mouse wheels use a 150 ms cubic interpolation while
+small touchpad deltas remain native. Each 5-point zoom gesture is completed in
+three anchored layout frames (2% + 2% + 1%), with the real WebKit smoke still
+requiring the final 105% value.

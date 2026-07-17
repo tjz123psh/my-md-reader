@@ -110,6 +110,37 @@
   window.addEventListener("resize", scheduleActiveHeading, { passive: true });
   scrollFrame = window.requestAnimationFrame(reportActiveHeading);
 
+  const prefersReducedMotion = window.matchMedia(
+    "(prefers-reduced-motion: reduce)",
+  ).matches;
+
+  let smoothScrollFrame = 0;
+  let smoothScrollStart = 0;
+  let smoothScrollTarget = 0;
+  let smoothScrollStartedAt = 0;
+
+  const animateSmoothScroll = (now) => {
+    const progress = Math.min(1, (now - smoothScrollStartedAt) / 150);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    window.scrollTo(0, smoothScrollStart + (smoothScrollTarget - smoothScrollStart) * eased);
+    if (progress < 1) {
+      smoothScrollFrame = window.requestAnimationFrame(animateSmoothScroll);
+    } else {
+      smoothScrollFrame = 0;
+    }
+  };
+
+  const queueSmoothScroll = (delta) => {
+    const maximum = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    smoothScrollStart = window.scrollY;
+    if (!smoothScrollFrame) smoothScrollTarget = window.scrollY;
+    smoothScrollTarget = Math.max(0, Math.min(maximum, smoothScrollTarget + delta * 1.65));
+    smoothScrollStartedAt = window.performance.now();
+    if (!smoothScrollFrame) {
+      smoothScrollFrame = window.requestAnimationFrame(animateSmoothScroll);
+    }
+  };
+
   const zoomBounds = (percent) => Math.max(75, Math.min(200, Number(percent) || 100));
 
   const currentZoom = () => {
@@ -143,7 +174,9 @@
     return bounded;
   };
 
-  const zoomStep = 5;
+  const zoomStep = 1;
+  const zoomImpulse = 5;
+  const zoomFrameStepLimit = 2;
   const zoomWheelThreshold = 24;
   let zoomWheelDelta = 0;
   let zoomWheelDirection = 0;
@@ -155,10 +188,11 @@
     zoomFrame = 0;
     const direction = Math.sign(pendingZoomSteps);
     if (!direction) return;
-    pendingZoomSteps -= direction;
+    const frameSteps = Math.min(zoomFrameStepLimit, Math.abs(pendingZoomSteps));
+    pendingZoomSteps -= direction * frameSteps;
 
     const current = currentZoom();
-    const requested = zoomBounds(current + direction * zoomStep);
+    const requested = zoomBounds(current + direction * zoomStep * frameSteps);
     if (requested !== current) {
       setZoom(requested, zoomAnchorY);
       window.webkit?.messageHandlers?.zoom?.postMessage(JSON.stringify({
@@ -176,16 +210,25 @@
   };
 
   window.addEventListener("wheel", (event) => {
-    if (!event.ctrlKey) return;
-    event.preventDefault();
-
     const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-      ? 16
+      ? 28
       : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
         ? window.innerHeight
         : 1;
     const delta = event.deltaY * unit;
     if (!delta) return;
+
+    if (!event.ctrlKey) {
+      const discreteWheel = (
+        event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || Math.abs(delta) >= 32
+      );
+      if (!prefersReducedMotion && discreteWheel) {
+        event.preventDefault();
+        queueSmoothScroll(delta);
+      }
+      return;
+    }
+    event.preventDefault();
 
     const direction = delta < 0 ? 1 : -1;
     if (direction !== zoomWheelDirection) {
@@ -198,12 +241,15 @@
     if (pendingZoomSteps && Math.sign(pendingZoomSteps) !== direction) {
       pendingZoomSteps = 0;
     }
-    pendingZoomSteps = Math.max(-6, Math.min(6, pendingZoomSteps + direction));
+    pendingZoomSteps = Math.max(
+      -20,
+      Math.min(20, pendingZoomSteps + direction * zoomImpulse),
+    );
     zoomAnchorY = event.clientY;
     scheduleZoomStep();
   }, { passive: false });
 
-  const motionBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  const motionBehavior = prefersReducedMotion
     ? "auto"
     : "smooth";
 

@@ -108,8 +108,10 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("Math.floor((low + high) / 2)", self.rendered.html)
         self.assertIn("atDocumentEnd", self.rendered.html)
 
-    def test_ctrl_wheel_zooms_without_intercepting_plain_scrolling(self) -> None:
-        self.assertIn('if (!event.ctrlKey) return;', self.rendered.html)
+    def test_wheel_bridge_keeps_touchpad_native_and_smooths_discrete_wheels(self) -> None:
+        self.assertIn("const discreteWheel = (", self.rendered.html)
+        self.assertIn("queueSmoothScroll(delta)", self.rendered.html)
+        self.assertIn("requestAnimationFrame(animateSmoothScroll)", self.rendered.html)
         self.assertIn("event.preventDefault();", self.rendered.html)
         self.assertIn("messageHandlers?.zoom", self.rendered.html)
         self.assertIn('}, { passive: false });', self.rendered.html)
@@ -117,7 +119,9 @@ class MarkdownRendererTests(unittest.TestCase):
     def test_zoom_updates_body_and_uses_an_anchored_scroll_position(self) -> None:
         self.assertIn('target.style.setProperty("--reader-zoom"', self.rendered.html)
         self.assertIn("oldAnchor / oldHeight", self.rendered.html)
-        self.assertIn("const zoomStep = 5", self.rendered.html)
+        self.assertIn("const zoomStep = 1", self.rendered.html)
+        self.assertIn("const zoomImpulse = 5", self.rendered.html)
+        self.assertIn("const zoomFrameStepLimit = 2", self.rendered.html)
         self.assertIn("requestAnimationFrame(flushZoomStep)", self.rendered.html)
         self.assertIn('behavior: "auto"', self.rendered.html)
 
@@ -138,8 +142,21 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("Adw.ToggleGroup()", source)
         self.assertIn('name="ask"', source)
         self.assertIn('name="edit"', source)
+        self.assertIn("Adw.Banner(", source)
+        self.assertIn("Gdk.ModifierType.CONTROL_MASK", source)
         self.assertIn("Gtk.TextView(", source)
         self.assertNotIn("self._edit_toggle", source)
+
+    def test_document_search_uses_a_header_popover_without_key_capture(self) -> None:
+        root = Path(__file__).parents[1]
+        window = (root / "src/mdreader/window.py").read_text(encoding="utf-8")
+        blueprint = (root / "src/resources/ui/window.blp").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Gtk.MenuButton search_button", blueprint)
+        self.assertIn("def _create_search_popover", window)
+        self.assertNotIn("Gtk.SearchBar", window)
+        self.assertNotIn("set_key_capture_widget", window)
 
     def test_remote_images_are_blocked_by_token_policy_and_csp(self) -> None:
         self.assertIn('src="about:blank"', self.rendered.html)

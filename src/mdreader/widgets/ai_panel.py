@@ -114,6 +114,12 @@ class AiPanel(Gtk.Box):
         self._mode_group.connect("notify::active-name", self._on_mode_changed)
         content.append(self._mode_group)
 
+        self._edit_banner = Adw.Banner(
+            title="Select text in the document before proposing a change"
+        )
+        self._edit_banner.set_revealed(False)
+        content.append(self._edit_banner)
+
         self._context_revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
             reveal_child=False,
@@ -209,7 +215,7 @@ class AiPanel(Gtk.Box):
             spacing=6,
         )
         composer_hint = Gtk.Label(
-            label="Enter to send · Shift+Enter for a new line",
+            label="Ctrl+Enter to send",
             xalign=0,
             hexpand=True,
             ellipsize=Pango.EllipsizeMode.END,
@@ -284,9 +290,8 @@ class AiPanel(Gtk.Box):
     def set_selection(self, selection: DocumentSelection) -> None:
         self._selection = selection
         if selection.is_empty:
-            if self._mode_group.get_active_name() == "edit":
-                self._mode_group.set_active_name("ask")
             self._context_revealer.set_reveal_child(False)
+            self._update_mode_hint()
             self._update_composer()
             return
 
@@ -298,6 +303,7 @@ class AiPanel(Gtk.Box):
         self._context_meta.set_label(location)
         self._context_quote.set_label(selection.text)
         self._context_revealer.set_reveal_child(True)
+        self._update_mode_hint()
         self._update_composer()
 
     def append_user(self, text: str) -> None:
@@ -394,13 +400,18 @@ class AiPanel(Gtk.Box):
 
     def _on_mode_changed(self, group: Adw.ToggleGroup, _param: object) -> None:
         edit_mode = group.get_active_name() == "edit"
-        if edit_mode and self._selection.is_empty:
-            group.set_active_name("ask")
-            return
         self._prompt_placeholder.set_label(
-            "Describe the change to the selected lines…"
+            "Select text, then describe the change you want…"
             if edit_mode
             else "Ask about this document or add instructions…"
+        )
+        self._update_mode_hint()
+        self._update_composer()
+
+    def _update_mode_hint(self) -> None:
+        self._edit_banner.set_revealed(
+            self._mode_group.get_active_name() == "edit"
+            and self._selection.is_empty
         )
 
     def _on_prompt_changed(self, buffer: Gtk.TextBuffer) -> None:
@@ -416,7 +427,7 @@ class AiPanel(Gtk.Box):
     ) -> bool:
         if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             return False
-        if state & Gdk.ModifierType.SHIFT_MASK:
+        if not state & Gdk.ModifierType.CONTROL_MASK:
             return False
         self._on_send_requested(self._prompt_view)
         return True
@@ -433,12 +444,18 @@ class AiPanel(Gtk.Box):
 
     def _update_composer(self) -> None:
         enabled = self._available and self._document is not None and not self._running
+        edit_ready = (
+            self._mode_group.get_active_name() != "edit"
+            or not self._selection.is_empty
+        )
         self._prompt_view.set_sensitive(enabled)
         self._send_button.set_sensitive(
-            enabled and self._prompt_buffer.get_char_count() > 0
+            enabled
+            and edit_ready
+            and self._prompt_buffer.get_char_count() > 0
         )
         self._mode_group.set_sensitive(enabled)
-        self._edit_mode.set_enabled(enabled and not self._selection.is_empty)
+        self._edit_mode.set_enabled(enabled)
         self._model_button.set_sensitive(
             self._available and bool(self._models) and not self._running
         )

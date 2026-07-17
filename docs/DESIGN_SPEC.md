@@ -158,9 +158,12 @@ Breakpoints are initially 760sp and 1120sp.
 - The AI header close control hides only the assistant; it is not a window
   title button.
 - Ask is a read-only discussion mode. Edit is an explicit selected-line diff
-  proposal mode and remains unavailable without a selection.
-- The AI prompt accepts multiple lines; Enter sends and Shift+Enter adds a
-  line break.
+  proposal mode; without a selection it remains visible and explains what the
+  user must select before sending.
+- The AI prompt accepts multiple lines and preserves normal IME behavior;
+  `Ctrl+Enter` sends while Enter remains available to input methods and text.
+- Document search opens from a compact button on the left side of the main
+  header instead of occupying a full-width row above the document.
 - External links open outside the application.
 - Zoom is visible as a compact percentage in the reader menu/status popover,
   not as a permanent slider.

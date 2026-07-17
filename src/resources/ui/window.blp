@@ -19,6 +19,12 @@ template $MdReaderWindow: Adw.ApplicationWindow {
           action-name: "win.toggle-library";
         }
 
+        [start]
+        Gtk.MenuButton search_button {
+          icon-name: "system-search-symbolic";
+          tooltip-text: "Find in document";
+        }
+
         title-widget: Gtk.Label title_label {
           label: "MD Reader";
           ellipsize: end;

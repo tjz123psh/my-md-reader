@@ -36,6 +36,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
     toolbar_view = Gtk.Template.Child()
     header_bar = Gtk.Template.Child()
     files_button = Gtk.Template.Child()
+    search_button = Gtk.Template.Child()
     title_label = Gtk.Template.Child()
     ai_button = Gtk.Template.Child()
     menu_button = Gtk.Template.Child()
@@ -77,6 +78,9 @@ class MdReaderWindow(Adw.ApplicationWindow):
 
         self.files_button.update_property(
             [Gtk.AccessibleProperty.LABEL], ["Files and outline"]
+        )
+        self.search_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Find in document"]
         )
         self.ai_button.update_property([Gtk.AccessibleProperty.LABEL], ["AI assistant"])
         self.menu_button.update_property([Gtk.AccessibleProperty.LABEL], ["Main menu"])
@@ -125,7 +129,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
         )
         self.content_slot.set_child(self._library_split)
 
-        self._create_search_bar()
+        self._create_search_popover()
         self._setup_actions()
         self._setup_breakpoints()
 
@@ -183,14 +187,20 @@ class MdReaderWindow(Adw.ApplicationWindow):
 
         threading.Thread(target=worker, name="mdreader-workspace-scan", daemon=True).start()
 
-    def _create_search_bar(self) -> None:
-        self._search_bar = Gtk.SearchBar()
-        self._search_entry = Gtk.SearchEntry(hexpand=True, placeholder_text="Find in document")
-        self._search_bar.set_child(self._search_entry)
-        self._search_bar.connect_entry(self._search_entry)
-        self._search_bar.set_key_capture_widget(self)
+    def _create_search_popover(self) -> None:
+        self._search_entry = Gtk.SearchEntry(
+            width_chars=28,
+            placeholder_text="Find in document",
+        )
         self._search_entry.connect("search-changed", self._on_search_changed)
-        self.toolbar_view.add_top_bar(self._search_bar)
+        search_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        search_box.set_margin_start(10)
+        search_box.set_margin_end(10)
+        search_box.set_margin_top(10)
+        search_box.set_margin_bottom(10)
+        search_box.append(self._search_entry)
+        popover = Gtk.Popover(child=search_box)
+        self.search_button.set_popover(popover)
 
     def _setup_actions(self) -> None:
         actions = {
@@ -284,10 +294,12 @@ class MdReaderWindow(Adw.ApplicationWindow):
         )
 
     def _on_find(self, _action: Gio.SimpleAction, _parameter: object) -> None:
-        enabled = not self._search_bar.get_search_mode()
-        self._search_bar.set_search_mode(enabled)
-        if enabled:
-            self._search_entry.grab_focus()
+        self.search_button.popup()
+        GLib.idle_add(self._focus_search_entry)
+
+    def _focus_search_entry(self) -> bool:
+        self._search_entry.grab_focus()
+        return GLib.SOURCE_REMOVE
 
     def _on_search_changed(self, entry: Gtk.SearchEntry) -> None:
         self._document.find(entry.get_text())
@@ -570,7 +582,10 @@ pacstrap -K /mnt base linux linux-firmware
             self._test_ctrl_wheel = True
             self._document.dispatch_ctrl_wheel_for_test()
         if os.environ.pop("MDREADER_TEST_QUIT_ON_PRESENT", "") == "1":
-            GLib.timeout_add(200, self._quit_presented_smoke)
+            GLib.timeout_add(
+                600 if self._test_ctrl_wheel else 200,
+                self._quit_presented_smoke,
+            )
 
     def _quit_presented_smoke(self) -> bool:
         application = self.get_application()
@@ -779,7 +794,7 @@ pacstrap -K /mnt base linux linux-firmware
             announce=False,
             defer_persist=True,
         )
-        if self._test_ctrl_wheel:
+        if self._test_ctrl_wheel and self._zoom == 105:
             self._test_ctrl_wheel = False
             print(f"MDREADER_TEST_CTRL_WHEEL_OK={self._zoom}", flush=True)
 
