@@ -75,7 +75,7 @@ This is the live project state. Update it after each coherent milestone.
 Updated 2026-07-17. The repository is initialized on `main` with the GitHub
 `origin` configured. The native reader, workspace navigation, selection-aware
 OpenCode conversation and selected-line diff workflow are functional. There are
-50 passing unit tests plus successful Meson compile/test runs.
+53 passing unit tests plus successful Meson compile/test runs.
 
 OpenCode 1.18.2 must remain isolated through both the injected deny-all agent
 and the private temporary runtime directory. Do not change it back to
@@ -105,7 +105,7 @@ plus the real About dialog confirmed GTK resolves the icon. The source render is
 in `/tmp/mdreader-icon-512.png` and the About acceptance screenshot is
 `/tmp/mdreader-icon-about-960.png`.
 
-There are now 50 passing unit tests plus successful compileall, JavaScript
+There are now 53 passing unit tests plus successful compileall, JavaScript
 syntax and four Meson tests. The GTK smoke waits for a real WebKit
 `document-presented` signal and covers both normal and missing-OpenCode startup;
 it skips only when no graphical D-Bus session is available or another MD Reader
@@ -144,3 +144,14 @@ acceleration and rendered completely with software compositing, so the reader
 now sets `WebKit.HardwareAccelerationPolicy.NEVER`. Dark-mode checks at all
 four Niri widths are in `/tmp/mdreader-software-{640,960,1280,1920}.png`;
 `/tmp/mdreader-software-image.png` confirms local images still render.
+
+Reader scrolling now uses direct native WebKit scrolling with CSS and WebKit
+smooth-scroll animation disabled, which avoids delayed software-rendered
+frames while retaining precise touchpad deltas. `Ctrl+mouse wheel` is the only
+zoom shortcut: the page applies 10% steps immediately to the body, preserves
+the pointer-relative reading position, and reports the bounded 75–200% value
+to GTK for persistence. The broken `Ctrl++`, `Ctrl+-` and `Ctrl+0`
+accelerators were removed. AI streaming renders its first text immediately,
+then throttles full Markdown rebuilds and coalesces scroll-to-bottom work.
+Acceptance at 640, 960, 1280 and 1920px is recorded in
+`/tmp/mdreader-scroll-{640,960,1280,1920}.png`.

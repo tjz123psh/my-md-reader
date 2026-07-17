@@ -106,6 +106,25 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("requestAnimationFrame(reportActiveHeading)", self.rendered.html)
         self.assertIn("atDocumentEnd", self.rendered.html)
 
+    def test_ctrl_wheel_zooms_without_intercepting_plain_scrolling(self) -> None:
+        self.assertIn('if (!event.ctrlKey) return;', self.rendered.html)
+        self.assertIn("event.preventDefault();", self.rendered.html)
+        self.assertIn("messageHandlers?.zoom", self.rendered.html)
+        self.assertIn('}, { passive: false });', self.rendered.html)
+
+    def test_zoom_updates_body_and_uses_an_anchored_scroll_position(self) -> None:
+        self.assertIn('target.style.setProperty("--reader-zoom"', self.rendered.html)
+        self.assertIn("oldAnchor / oldHeight", self.rendered.html)
+        self.assertNotIn('behavior: "smooth"', self.rendered.html)
+
+    def test_keyboard_zoom_accelerators_are_not_registered(self) -> None:
+        application = (
+            Path(__file__).parents[1] / "src/mdreader/application.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn('"win.zoom-in":', application)
+        self.assertNotIn('"win.zoom-out":', application)
+        self.assertNotIn('"win.zoom-reset":', application)
+
     def test_remote_images_are_blocked_by_token_policy_and_csp(self) -> None:
         self.assertIn('src="about:blank"', self.rendered.html)
         self.assertIn('data-blocked-source="https://example.com/tracker.png"', self.rendered.html)

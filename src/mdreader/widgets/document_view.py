@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 from collections.abc import Callable
@@ -29,6 +30,7 @@ class DocumentView(Gtk.Box):
         "active-heading-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "document-presented": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "open-local-document": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "zoom-requested": (GObject.SignalFlags.RUN_FIRST, None, (int, float)),
     }
 
     def __init__(self) -> None:
@@ -117,10 +119,11 @@ class DocumentView(Gtk.Box):
 
         threading.Thread(target=worker, name="mdreader-render", daemon=True).start()
 
-    def set_zoom(self, zoom: int) -> None:
+    def set_zoom(self, zoom: int, anchor_y: float | None = None) -> None:
         self._zoom = max(75, min(200, zoom))
         if self._web_view is not None:
-            self._evaluate(f"window.mdReader?.setZoom({self._zoom});")
+            anchor = "null" if anchor_y is None else json.dumps(float(anchor_y))
+            self._evaluate(f"window.mdReader?.setZoom({self._zoom}, {anchor});")
 
     def find(self, text: str) -> None:
         if self._web_view is None:
@@ -147,11 +150,14 @@ class DocumentView(Gtk.Box):
         manager.connect("script-message-received::selection", self._on_selection_message)
         manager.register_script_message_handler("outline", None)
         manager.connect("script-message-received::outline", self._on_outline_message)
+        manager.register_script_message_handler("zoom", None)
+        manager.connect("script-message-received::zoom", self._on_zoom_message)
         self._web_view = WebKit.WebView(user_content_manager=manager)
         settings = self._web_view.get_settings()
         settings.set_enable_javascript(True)
         settings.set_javascript_can_open_windows_automatically(False)
         settings.set_enable_developer_extras(False)
+        settings.set_enable_smooth_scrolling(False)
         # WebKitGTK's DMA-BUF renderer can leave unpainted white tiles on
         # Wayland/NVIDIA while scrolling long documents. A reading surface
         # favors reliable text painting over accelerated compositing.
@@ -241,6 +247,26 @@ class DocumentView(Gtk.Box):
         except (TypeError, ValueError, json.JSONDecodeError, AttributeError):
             return
         self.emit("active-heading-changed", heading_id)
+
+    def _on_zoom_message(self, _manager: object, message: object) -> None:
+        try:
+            value = message.get_js_value() if hasattr(message, "get_js_value") else message
+            if hasattr(value, "is_string") and value.is_string():
+                raw = value.to_string()
+            else:
+                raw = value.to_json(0) if hasattr(value, "to_json") else str(value)
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                return
+            percent = max(75, min(200, int(payload.get("percent", 100))))
+            anchor_y = float(payload.get("anchorY", 0))
+            if not math.isfinite(anchor_y):
+                return
+            anchor_y = max(0.0, min(10000.0, anchor_y))
+        except (TypeError, ValueError, json.JSONDecodeError, AttributeError):
+            return
+        self._zoom = percent
+        self.emit("zoom-requested", percent, anchor_y)
 
     def _on_decide_policy(self, _view: object, decision: object, decision_type: object) -> bool:
         if decision_type != WebKit.PolicyDecisionType.NAVIGATION_ACTION:

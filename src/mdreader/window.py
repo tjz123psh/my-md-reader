@@ -86,6 +86,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._document.connect("active-heading-changed", self._on_active_heading_changed)
         self._document.connect("document-presented", self._on_document_presented)
         self._document.connect("open-local-document", self._on_local_document)
+        self._document.connect("zoom-requested", self._on_zoom_requested)
         self._ai = AiPanel(
             self._document.scroll_to_source,
             self._on_ai_send,
@@ -754,11 +755,20 @@ pacstrap -K /mnt base linux linux-firmware
     def _change_zoom(self, amount: int) -> None:
         self._set_zoom(self._zoom + amount)
 
-    def _set_zoom(self, zoom: int) -> None:
+    def _on_zoom_requested(
+        self, _view: DocumentView, zoom: int, _anchor_y: float
+    ) -> None:
+        self._set_zoom(zoom, update_document=False, announce=False)
+
+    def _set_zoom(
+        self, zoom: int, *, update_document: bool = True, announce: bool = True
+    ) -> None:
         self._zoom = max(75, min(200, zoom))
         self._settings.set_int("document-zoom", self._zoom)
-        self._document.set_zoom(self._zoom)
-        self._show_toast(f"Document zoom: {self._zoom}%")
+        if update_document:
+            self._document.set_zoom(self._zoom)
+        if announce:
+            self._show_toast(f"Document zoom: {self._zoom}%")
 
     def _show_toast(self, message: str) -> None:
         self.toast_overlay.add_toast(Adw.Toast(title=message, timeout=3))

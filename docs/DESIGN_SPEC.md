@@ -150,7 +150,7 @@ Breakpoints are initially 760sp and 1120sp.
 
 - `Ctrl+O`: open folder.
 - `Ctrl+F`: find in document.
-- `Ctrl++`, `Ctrl+-`, `Ctrl+0`: document zoom only.
+- `Ctrl+mouse wheel`: document-only zoom, anchored near the pointer.
 - `Ctrl+Shift+A`: toggle/focus AI panel.
 - `Escape`: close an overlay or clear selection context, depending on focus.
 - Clicking an outline entry scrolls to the heading without reloading.

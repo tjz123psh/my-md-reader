@@ -85,7 +85,7 @@ meson install -C build-install
 
 - `Ctrl+O`：打开 Markdown 文件夹
 - `Ctrl+F`：在当前文档中查找
-- `Ctrl++`、`Ctrl+-`、`Ctrl+0`：调整或重置文档缩放
+- `Ctrl+鼠标滚轮`：缩放文档（75%–200%，保持指针附近的阅读位置）
 - `Ctrl+Shift+A`：打开或聚焦 AI 面板
 - `Ctrl+Z`：撤销最近一次已接受的 AI 修改
 

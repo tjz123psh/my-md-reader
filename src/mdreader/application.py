@@ -90,9 +90,6 @@ class MdReaderApplication(Adw.Application):
             "win.open-folder": ["<Control>o"],
             "win.find": ["<Control>f"],
             "win.toggle-ai": ["<Control><Shift>a"],
-            "win.zoom-in": ["<Control>plus", "<Control>equal"],
-            "win.zoom-out": ["<Control>minus"],
-            "win.zoom-reset": ["<Control>0"],
             "win.undo-ai-change": ["<Control>z"],
         }
         for action, keys in accelerators.items():

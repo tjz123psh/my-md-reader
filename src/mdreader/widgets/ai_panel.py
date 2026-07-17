@@ -36,7 +36,9 @@ class AiPanel(Gtk.Box):
         self._assistant_content: Gtk.Box | None = None
         self._thinking_row: Gtk.Box | None = None
         self._assistant_text = ""
+        self._last_rendered_text = ""
         self._render_source_id = 0
+        self._scroll_source_id = 0
         self._markdown = AiMarkdownRenderer()
         self._running = False
         self._available = (
@@ -183,6 +185,7 @@ class AiPanel(Gtk.Box):
         self._assistant_content = None
         self._thinking_row = None
         self._assistant_text = ""
+        self._last_rendered_text = ""
         self._clear_box(self._transcript)
         self._status.set_icon_name("chat-symbolic")
         self._status.set_title(f"Using {label}")
@@ -239,6 +242,7 @@ class AiPanel(Gtk.Box):
         block.append(self._assistant_body)
         self._transcript.append(block)
         self._assistant_text = ""
+        self._last_rendered_text = ""
         self._set_running(True)
         self._scroll_to_bottom()
 
@@ -247,8 +251,12 @@ class AiPanel(Gtk.Box):
             self.begin_assistant()
         self._assistant_text += text
         if not self._render_source_id:
-            self._render_source_id = GLib.timeout_add(60, self._render_assistant_text)
-        self._scroll_to_bottom()
+            if not self._last_rendered_text:
+                self._render_source_id = GLib.idle_add(self._render_assistant_text)
+            else:
+                self._render_source_id = GLib.timeout_add(
+                    140, self._render_assistant_text
+                )
 
     def finish_assistant(self, message: str = "") -> None:
         self._cancel_render_timeout()
@@ -257,6 +265,7 @@ class AiPanel(Gtk.Box):
         self._render_assistant_text()
         self._remove_thinking_row()
         self._set_running(False)
+        self._scroll_to_bottom()
 
     def show_error(self, message: str) -> None:
         self._cancel_render_timeout()
@@ -327,10 +336,13 @@ class AiPanel(Gtk.Box):
         self._render_source_id = 0
         if self._assistant_content is None:
             return GLib.SOURCE_REMOVE
+        if self._assistant_text == self._last_rendered_text:
+            return GLib.SOURCE_REMOVE
         self._clear_box(self._assistant_content)
         dark = Adw.StyleManager.get_default().get_dark()
         for block in self._markdown.render(self._assistant_text, dark=dark):
             self._assistant_content.append(self._markdown_block(block))
+        self._last_rendered_text = self._assistant_text
         self._scroll_to_bottom()
         return GLib.SOURCE_REMOVE
 
@@ -444,9 +456,13 @@ class AiPanel(Gtk.Box):
             child = following
 
     def _scroll_to_bottom(self) -> None:
+        if self._scroll_source_id:
+            return
+
         def scroll() -> bool:
+            self._scroll_source_id = 0
             adjustment = self._scroll.get_vadjustment()
             adjustment.set_value(max(0, adjustment.get_upper() - adjustment.get_page_size()))
-            return False
+            return GLib.SOURCE_REMOVE
 
-        GLib.idle_add(scroll)
+        self._scroll_source_id = GLib.idle_add(scroll)

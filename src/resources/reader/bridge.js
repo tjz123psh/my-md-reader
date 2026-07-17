@@ -99,14 +99,76 @@
   window.addEventListener("resize", scheduleActiveHeading, { passive: true });
   scheduleActiveHeading();
 
+  const zoomBounds = (percent) => Math.max(75, Math.min(200, Number(percent) || 100));
+
+  const currentZoom = () => {
+    const target = document.body || document.documentElement;
+    const value = Number.parseFloat(
+      window.getComputedStyle(target).getPropertyValue("--reader-zoom"),
+    );
+    return zoomBounds(Math.round((Number.isFinite(value) ? value : 1) * 100));
+  };
+
+  const setZoom = (percent, anchorY = null) => {
+    const bounded = zoomBounds(percent);
+    const target = document.body || document.documentElement;
+    const viewportAnchor = anchorY != null && Number.isFinite(Number(anchorY))
+      ? Math.max(0, Math.min(window.innerHeight, Number(anchorY)))
+      : window.innerHeight / 2;
+    const oldHeight = document.documentElement.scrollHeight;
+    const oldAnchor = window.scrollY + viewportAnchor;
+
+    // The initial zoom is an inline body property, so updates must target the
+    // body as well. Reading scrollHeight after the write forces the new layout.
+    target.style.setProperty("--reader-zoom", String(bounded / 100));
+    const newHeight = document.documentElement.scrollHeight;
+    if (oldHeight > 0 && newHeight !== oldHeight) {
+      window.scrollTo({
+        top: (oldAnchor / oldHeight) * newHeight - viewportAnchor,
+        behavior: "auto",
+      });
+    }
+    scheduleActiveHeading();
+    return bounded;
+  };
+
+  let zoomWheelDelta = 0;
+  let zoomWheelDirection = 0;
+  window.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+
+    const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? window.innerHeight
+        : 1;
+    const delta = event.deltaY * unit;
+    if (!delta) return;
+
+    const direction = delta < 0 ? 1 : -1;
+    if (direction !== zoomWheelDirection) {
+      zoomWheelDelta = 0;
+      zoomWheelDirection = direction;
+    }
+    zoomWheelDelta += Math.abs(delta);
+    if (zoomWheelDelta < 40) return;
+    zoomWheelDelta = 0;
+
+    const requested = zoomBounds(currentZoom() + direction * 10);
+    if (requested === currentZoom()) return;
+    setZoom(requested, event.clientY);
+    window.webkit?.messageHandlers?.zoom?.postMessage(JSON.stringify({
+      percent: requested,
+      anchorY: event.clientY,
+    }));
+  }, { passive: false });
+
   window.mdReader = {
-    setZoom(percent) {
-      const bounded = Math.max(75, Math.min(200, Number(percent) || 100));
-      document.documentElement.style.setProperty("--reader-zoom", String(bounded / 100));
-    },
+    setZoom,
     scrollToHeading(id) {
       const target = document.getElementById(id);
-      if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
+      if (target) target.scrollIntoView({ block: "start", behavior: "auto" });
     },
     scrollToSource(line) {
       const target = Array.from(document.querySelectorAll("[data-source-start]")).find((node) => {
@@ -114,7 +176,7 @@
         const end = Number.parseInt(node.dataset.sourceEnd || "0", 10);
         return start <= line && line <= end;
       });
-      if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
+      if (target) target.scrollIntoView({ block: "center", behavior: "auto" });
     },
     clearSelection() {
       window.getSelection()?.removeAllRanges();

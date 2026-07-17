@@ -227,6 +227,11 @@ The model menu is populated from OpenCode asynchronously. Secrets remain owned
 by OpenCode/provider storage. Chat transcripts containing document text are not
 persisted until a clear retention policy exists.
 
+Document zoom is initiated by `Ctrl+mouse wheel` inside the WebKit surface.
+The page applies the new body zoom immediately around the pointer, then sends
+the validated percentage to GTK for GSettings persistence. Plain wheel and
+touchpad scrolling remain on WebKit's native event path.
+
 ## 6. Failure behavior
 
 - No workspace: show an `AdwStatusPage` with “Open Folder”.
