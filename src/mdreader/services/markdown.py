@@ -13,6 +13,7 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 from mdreader.models import OutlineItem, RenderedDocument
+from mdreader.services.themes import ReaderTheme, get_theme
 
 
 class MarkdownUnavailableError(RuntimeError):
@@ -51,6 +52,7 @@ class MarkdownRenderer:
         *,
         title: str = "Document",
         zoom: int = 100,
+        theme: ReaderTheme | None = None,
         document_path: Path | None = None,
         workspace_root: Path | None = None,
     ) -> RenderedDocument:
@@ -96,7 +98,9 @@ class MarkdownRenderer:
                 f'<pre class="source-fallback" data-source-start="1" '
                 f'data-source-end="{line_count}">{html.escape(source)}</pre>\n'
             )
-        document = self._html_document(body, title=title, zoom=zoom)
+        document = self._html_document(
+            body, title=title, zoom=zoom, theme=theme or get_theme("")
+        )
         return RenderedDocument(
             html=document,
             outline=tuple(outline),
@@ -282,12 +286,14 @@ class MarkdownRenderer:
 
         return _OBSIDIAN_IMAGE.sub(replacement, source)
 
-    def _html_document(self, body: str, *, title: str, zoom: int) -> str:
+    def _html_document(
+        self, body: str, *, title: str, zoom: int, theme: ReaderTheme
+    ) -> str:
         css = self._read_asset("reader.css")
         bridge = self._read_asset("bridge.js")
         bounded_zoom = max(75, min(200, zoom))
         return f"""<!doctype html>
-<html lang="en">
+<html lang="en" style="{theme.reader_inline_style()}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from mdreader.services.ai_markdown import AiMarkdownRenderer
+from mdreader.services.themes import THEMES
 
 
 class AiMarkdownRendererTests(unittest.TestCase):
@@ -32,7 +33,7 @@ class AiMarkdownRendererTests(unittest.TestCase):
         self.assertEqual(blocks[0].kind, "code")
         self.assertEqual(blocks[0].language, "python")
         self.assertIn("foreground=", blocks[0].markup)
-        self.assertIn("#9a653f", blocks[0].markup)
+        self.assertIn("#9A653F", blocks[0].markup)
 
     def test_raw_html_is_escaped_and_unsafe_links_are_not_activated(self) -> None:
         blocks = self.renderer.render(
@@ -45,7 +46,18 @@ class AiMarkdownRendererTests(unittest.TestCase):
 
     def test_dark_palette_is_used_for_inline_code(self) -> None:
         blocks = self.renderer.render("Use `pacman`.", dark=True)
-        self.assertIn("#aab596", blocks[0].markup)
+        self.assertIn("#B8C49B", blocks[0].markup)
+
+    def test_each_reader_theme_controls_ai_inline_and_fenced_code_colors(self) -> None:
+        for theme in THEMES:
+            with self.subTest(theme=theme.id):
+                inline = self.renderer.render("Use `pacman`.", theme=theme)
+                fenced = self.renderer.render(
+                    "```python\nanswer = 42\n```\n", theme=theme
+                )
+                self.assertIn(theme.syntax_string, inline[0].markup)
+                self.assertIn(theme.code_bg, inline[0].markup)
+                self.assertIn(theme.syntax_number, fenced[0].markup)
 
 
 if __name__ == "__main__":

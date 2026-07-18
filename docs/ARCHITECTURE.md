@@ -4,8 +4,9 @@
 
 MD Reader is a local-first, read-only Markdown workspace for Linux. It targets
 people who spend long periods reading project notes, specifications and
-technical documentation. The single primary job is to open a folder and make
-its Markdown comfortable to navigate, understand and discuss.
+technical documentation. The single primary job is to open a local Markdown
+document directly, or open its folder as a workspace, and make the content
+comfortable to navigate, understand and discuss.
 
 The application must remain useful with no account, no network and no
 OpenCode installation. AI is an additive panel, not the application shell.
@@ -189,6 +190,7 @@ The reader itself has no editable text surface and no Save action.
 
 ```text
 src/mdreader/
+├── bootstrap.py            pre-GTK environment and resource registration
 ├── application.py          app lifecycle, global actions, dependency checks
 ├── window.py               composition and adaptive breakpoints
 ├── models/
@@ -199,6 +201,7 @@ src/mdreader/
 │   ├── workspace.py        scan, monitor, canonical path policy
 │   ├── markdown.py         token parsing, outline and safe HTML
 │   ├── settings.py         typed GSettings facade
+│   ├── themes.py           five shared GTK/WebKit theme token sets
 │   ├── context.py          AI context envelope construction
 │   ├── opencode.py         model catalog, gateway and async event stream
 │   └── patches.py          validate, preview, apply and undo
@@ -228,8 +231,8 @@ GSettings stores preferences and lightweight session state:
 - window size and maximized state outside compositor overrides;
 - last workspace URI and last document URI;
 - document zoom (default 100, range 75–200, 5-point wheel steps);
-- a reserved warm light / warm dark / follow-system choice (the current UI
-  follows the system);
+- one unified reading theme ID: Warm Paper, Mist Blue, Sage Leaf, Midnight
+  Ink or Plum Night; legacy system/warm values migrate to a visible theme;
 - last selected OpenCode model identifier, with no credentials.
 
 The model menu is populated from OpenCode asynchronously. Secrets remain owned
@@ -237,20 +240,27 @@ by OpenCode/provider storage. Chat transcripts containing document text are not
 persisted until a clear retention policy exists.
 
 Document zoom is initiated by `Ctrl+mouse wheel` inside the WebKit surface.
-The page spreads each 5-point gesture across three animation frames, applies
-the body zoom around the pointer, then sends the validated percentage to GTK.
-GTK debounces GSettings persistence until the gesture settles. High-resolution
-touchpad input remains native; discrete mouse-wheel input uses a short
-time-based interpolation so long documents move smoothly without changing the
-hardware-acceleration safety policy.
+Each animation frame commits at most one final percentage, so a 5-point wheel
+step causes one layout pass instead of several visible reflows. The bridge
+anchors the source-mapped block under the pointer and corrects its post-layout
+position; only if no mapped block exists does it fall back to document-height
+ratio correction. GTK debounces GSettings persistence until the gesture
+settles. Small high-resolution touchpad deltas accumulate to a threshold, while
+each discrete mouse-wheel event remains exactly one 5-point step. Ordinary
+discrete scrolling keeps its short time-based interpolation.
 
 Document search is a compact popover anchored to the left side of the main
 header. It does not install a window-level key-capture widget, so typing and
-IME preedit inside the AI prompt remain owned by the focused `GtkTextView`.
+IME preedit inside the AI prompt remain owned by the focused `GtkTextView`. The
+composer registers only local `Ctrl+Enter` shortcuts and does not intercept
+normal key events. Before importing GTK, `bootstrap.py` selects the installed
+Fcitx GTK4 bridge when the session advertises Fcitx and the user has not
+explicitly chosen another `GTK_IM_MODULE`.
 
 ## 6. Failure behavior
 
-- No workspace: show an `AdwStatusPage` with “Open Folder”.
+- No document: show an `AdwStatusPage` with direct “Open Document” and
+  secondary “Open Folder” actions.
 - Unsupported/binary file: keep navigation usable and explain the failure.
 - Render failure: show source filename and a retry action, never a blank view.
 - Missing OpenCode: reading remains fully functional and the AI panel explains
@@ -266,10 +276,10 @@ IME preedit inside the AI prompt remain owned by the focused `GtkTextView`.
   line metadata, HTML escaping, context trimming and patch conflict checks.
 - Renderer fixtures: mixed Chinese/Latin text, nested lists, tables, task
   lists, long code, quotes, images, broken links and very large documents.
-- GTK smoke test: app starts with and without WebKit/OpenCode and can open a
-  fixture workspace.
+- GTK smoke test: app starts with and without OpenCode, opens a single fixture
+  document and receives a real 100% → 105% WebKit wheel zoom message.
 - Visual acceptance: real binary screenshots at 640, 960, 1280 and 1920 under
-  Niri; light, dark, empty, long-title and AI-context states.
+  Niri; all five themes, empty, long-title and AI-context states.
 - Accessibility: keyboard-only navigation, visible focus, high contrast and
   200% text scale.
 

@@ -16,7 +16,7 @@ class SettingsStore:
         "last-workspace": "",
         "last-document": "",
         "document-zoom": 100,
-        "color-scheme": "system",
+        "color-scheme": "warm-paper",
         "opencode-model": "",
     }
 

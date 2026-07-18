@@ -12,6 +12,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from mdreader import __version__
+from mdreader.services import build_gtk_theme_css
 from mdreader.services.settings import SettingsStore
 from mdreader.window import MdReaderWindow
 
@@ -74,6 +75,13 @@ class MdReaderApplication(Adw.Application):
         Gtk.StyleContext.add_provider_for_display(
             display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
+        theme_provider = Gtk.CssProvider()
+        theme_provider.load_from_string(build_gtk_theme_css())
+        Gtk.StyleContext.add_provider_for_display(
+            display,
+            theme_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+        )
 
     def _setup_actions(self) -> None:
         about = Gio.SimpleAction.new("about", None)
@@ -87,7 +95,8 @@ class MdReaderApplication(Adw.Application):
     def _setup_accelerators(self) -> None:
         accelerators = {
             "app.quit": ["<Control>q"],
-            "win.open-folder": ["<Control>o"],
+            "win.open-document": ["<Control>o"],
+            "win.open-folder": ["<Control><Shift>o"],
             "win.find": ["<Control>f"],
             "win.toggle-ai": ["<Control><Shift>a"],
             "win.undo-ai-change": ["<Control>z"],

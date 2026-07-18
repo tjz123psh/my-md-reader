@@ -22,6 +22,9 @@ from mdreader.services import (
     WorkspaceError,
     WorkspaceService,
     WorkspaceWatcher,
+    apply_color_scheme,
+    get_theme,
+    normalize_theme_id,
 )
 from mdreader.services.settings import SettingsStore
 from mdreader.services.patches import PatchProposal
@@ -45,6 +48,11 @@ class MdReaderWindow(Adw.ApplicationWindow):
     def __init__(self, *, settings: SettingsStore, initial_path: Path | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self._settings = settings
+        theme_id = normalize_theme_id(settings.get_string("color-scheme"))
+        self._theme = get_theme(theme_id)
+        self._settings.set_string("color-scheme", theme_id)
+        apply_color_scheme(self._theme)
+        self.add_css_class(self._theme.css_class)
         self._workspace: WorkspaceService | None = None
         self._watcher: WorkspaceWatcher | None = None
         self._current_relative_path: Path | None = None
@@ -87,7 +95,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
 
         self._library = LibrarySidebar(self._on_document_selected)
         self._library.set_outline_callback(self._on_outline_selected)
-        self._document = DocumentView()
+        self._document = DocumentView(theme=self._theme)
         self._document.connect("selection-changed", self._on_selection_changed)
         self._document.connect("active-heading-changed", self._on_active_heading_changed)
         self._document.connect("document-presented", self._on_document_presented)
@@ -98,6 +106,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
             self._on_ai_send,
             self._on_ai_cancel,
             current_model=self._selected_model,
+            theme=self._theme,
         )
 
         self._ai_split = Adw.OverlaySplitView(
@@ -204,6 +213,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
 
     def _setup_actions(self) -> None:
         actions = {
+            "open-document": self._on_open_document,
             "open-folder": self._on_open_folder,
             "toggle-library": self._on_toggle_library,
             "toggle-ai": self._on_toggle_ai,
@@ -222,6 +232,14 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._undo_action.connect("activate", self._on_patch_undo_action)
         self._undo_action.set_enabled(False)
         self.add_action(self._undo_action)
+
+        self._theme_action = Gio.SimpleAction.new_stateful(
+            "select-theme",
+            GLib.VariantType.new("s"),
+            GLib.Variant.new_string(self._theme.id),
+        )
+        self._theme_action.connect("activate", self._on_theme_selected)
+        self.add_action(self._theme_action)
 
         self._model_action = Gio.SimpleAction.new_stateful(
             "select-model",
@@ -263,6 +281,33 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self.files_button.set_visible(False)
         self._sync_ai_button_state()
 
+    def _on_open_document(
+        self, _action: Gio.SimpleAction, _parameter: object
+    ) -> None:
+        markdown_filter = Gtk.FileFilter(name="Markdown documents")
+        for suffix in ("md", "markdown", "mdown", "mkd"):
+            markdown_filter.add_suffix(suffix)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(markdown_filter)
+        dialog = Gtk.FileDialog(
+            title="Open Markdown Document",
+            modal=True,
+            filters=filters,
+            default_filter=markdown_filter,
+        )
+        dialog.open(self, None, self._on_document_file_selected)
+
+    def _on_document_file_selected(
+        self, dialog: Gtk.FileDialog, result: Gio.AsyncResult
+    ) -> None:
+        try:
+            document = dialog.open_finish(result)
+        except GLib.Error:
+            return
+        path = document.get_path()
+        if path:
+            self.open_path(Path(path))
+
     def _on_open_folder(self, _action: Gio.SimpleAction, _parameter: object) -> None:
         dialog = Gtk.FileDialog(title="Open Markdown Folder", modal=True)
         dialog.select_folder(self, None, self._on_folder_selected)
@@ -275,6 +320,26 @@ class MdReaderWindow(Adw.ApplicationWindow):
         path = folder.get_path()
         if path:
             self.open_workspace(Path(path))
+
+    def _on_theme_selected(
+        self, action: Gio.SimpleAction, parameter: GLib.Variant | None
+    ) -> None:
+        if parameter is None:
+            return
+        theme_id = normalize_theme_id(parameter.get_string())
+        theme = get_theme(theme_id)
+        if theme.id == self._theme.id:
+            action.set_state(GLib.Variant.new_string(theme.id))
+            return
+        self.remove_css_class(self._theme.css_class)
+        self._theme = theme
+        self.add_css_class(theme.css_class)
+        apply_color_scheme(theme)
+        self._document.set_theme(theme)
+        self._ai.refresh_theme(theme)
+        self._settings.set_string("color-scheme", theme.id)
+        action.set_state(GLib.Variant.new_string(theme.id))
+        self._show_toast(f"Theme: {theme.name}")
 
     def _on_toggle_library(self, _action: Gio.SimpleAction, _parameter: object) -> None:
         self._library_split.set_show_sidebar(not self._library_split.get_show_sidebar())

@@ -15,7 +15,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, GObject, Gtk
 
 from mdreader.models import DocumentSelection, RenderedDocument
-from mdreader.services import MarkdownRenderer
+from mdreader.services import MarkdownRenderer, ReaderTheme, get_theme
 
 try:
     gi.require_version("WebKit", "6.0")
@@ -33,11 +33,12 @@ class DocumentView(Gtk.Box):
         "zoom-requested": (GObject.SignalFlags.RUN_FIRST, None, (int, float)),
     }
 
-    def __init__(self) -> None:
+    def __init__(self, *, theme: ReaderTheme | None = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._renderer = MarkdownRenderer()
         self._load_generation = 0
         self._zoom = 100
+        self._theme = theme or get_theme("")
         self._document_path: Path | None = None
         self._web_view = None
 
@@ -47,14 +48,24 @@ class DocumentView(Gtk.Box):
 
         empty = Adw.StatusPage(
             icon_name="text-x-generic-symbolic",
-            title="Open a folder of Markdown files",
-            description="Choose a folder, then select a document to start reading",
+            title="Open a Markdown document",
+            description="Read one file directly, or open a folder as a workspace",
         )
-        open_button = Gtk.Button(label="Open Folder", action_name="win.open-folder")
-        open_button.add_css_class("pill")
-        open_button.add_css_class("suggested-action")
-        open_button.set_halign(Gtk.Align.CENTER)
-        empty.set_child(open_button)
+        open_actions = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+            halign=Gtk.Align.CENTER,
+        )
+        open_document = Gtk.Button(
+            label="Open Document", action_name="win.open-document"
+        )
+        open_document.add_css_class("pill")
+        open_document.add_css_class("suggested-action")
+        open_actions.append(open_document)
+        open_folder = Gtk.Button(label="Open Folder", action_name="win.open-folder")
+        open_folder.add_css_class("pill")
+        open_actions.append(open_folder)
+        empty.set_child(open_actions)
         self._stack.add_named(empty, "empty")
 
         self._loading = Adw.StatusPage(
@@ -109,6 +120,7 @@ class DocumentView(Gtk.Box):
                     source,
                     title=path.name,
                     zoom=self._zoom,
+                    theme=self._theme,
                     document_path=path,
                     workspace_root=workspace_root,
                 )
@@ -124,6 +136,12 @@ class DocumentView(Gtk.Box):
         if self._web_view is not None:
             anchor = "null" if anchor_y is None else json.dumps(float(anchor_y))
             self._evaluate(f"window.mdReader?.setZoom({self._zoom}, {anchor});")
+
+    def set_theme(self, theme: ReaderTheme) -> None:
+        self._theme = theme
+        if self._web_view is not None:
+            tokens = json.dumps(theme.reader_tokens(), ensure_ascii=True)
+            self._evaluate(f"window.mdReader?.setTheme({tokens});")
 
     def find(self, text: str) -> None:
         if self._web_view is None:

@@ -116,13 +116,16 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("messageHandlers?.zoom", self.rendered.html)
         self.assertIn('}, { passive: false });', self.rendered.html)
 
-    def test_zoom_updates_body_and_uses_an_anchored_scroll_position(self) -> None:
+    def test_zoom_updates_once_and_keeps_the_pointed_block_anchored(self) -> None:
         self.assertIn('target.style.setProperty("--reader-zoom"', self.rendered.html)
-        self.assertIn("oldAnchor / oldHeight", self.rendered.html)
-        self.assertIn("const zoomStep = 1", self.rendered.html)
+        self.assertIn("document.elementFromPoint", self.rendered.html)
+        self.assertIn('closest?.("[data-source-start]")', self.rendered.html)
+        self.assertIn("newAnchorY - viewportAnchorY", self.rendered.html)
         self.assertIn("const zoomImpulse = 5", self.rendered.html)
-        self.assertIn("const zoomFrameStepLimit = 2", self.rendered.html)
-        self.assertIn("requestAnimationFrame(flushZoomStep)", self.rendered.html)
+        self.assertIn("let impulses = 1", self.rendered.html)
+        self.assertIn("if (discreteWheel)", self.rendered.html)
+        self.assertIn("requestAnimationFrame(flushZoom)", self.rendered.html)
+        self.assertNotIn("zoomFrameStepLimit", self.rendered.html)
         self.assertIn('behavior: "auto"', self.rendered.html)
 
     def test_keyboard_zoom_accelerators_are_not_registered(self) -> None:
@@ -143,9 +146,38 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn('name="ask"', source)
         self.assertIn('name="edit"', source)
         self.assertIn("Adw.Banner(", source)
-        self.assertIn("Gdk.ModifierType.CONTROL_MASK", source)
+        self.assertIn("Gtk.ShortcutController()", source)
+        self.assertIn("<Control>Return", source)
+        self.assertNotIn("Gtk.EventControllerKey()", source)
         self.assertIn("Gtk.TextView(", source)
+        self.assertIn("self._assistant_history", source)
+        self.assertIn("for content, text in self._assistant_history", source)
+        self.assertIn("theme=self._theme", source)
         self.assertNotIn("self._edit_toggle", source)
+
+    def test_ui_can_open_a_single_markdown_document(self) -> None:
+        root = Path(__file__).parents[1]
+        window = (root / "src/mdreader/window.py").read_text(encoding="utf-8")
+        blueprint = (root / "src/resources/ui/window.blp").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"open-document": self._on_open_document', window)
+        self.assertIn("dialog.open(self", window)
+        self.assertIn('action: "win.open-document"', blueprint)
+
+    def test_five_theme_picker_is_exposed_in_the_primary_menu(self) -> None:
+        blueprint = (
+            Path(__file__).parents[1] / "src/resources/ui/window.blp"
+        ).read_text(encoding="utf-8")
+        self.assertIn('label: "Reading Theme"', blueprint)
+        for theme_id in (
+            "warm-paper",
+            "mist-blue",
+            "sage-leaf",
+            "midnight-ink",
+            "plum-night",
+        ):
+            self.assertIn(f'target: "{theme_id}"', blueprint)
 
     def test_document_search_uses_a_header_popover_without_key_capture(self) -> None:
         root = Path(__file__).parents[1]

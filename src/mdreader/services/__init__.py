@@ -3,6 +3,15 @@ from .context import ContextBuilder
 from .markdown import MarkdownRenderer, MarkdownUnavailableError
 from .opencode import OpenCodeError, OpenCodeGateway
 from .patches import PatchError, PatchProposal, PatchService
+from .themes import (
+    DEFAULT_THEME_ID,
+    THEMES,
+    ReaderTheme,
+    apply_color_scheme,
+    build_gtk_theme_css,
+    get_theme,
+    normalize_theme_id,
+)
 from .workspace import FileEntry, WorkspaceError, WorkspaceService, WorkspaceWatcher
 
 __all__ = [
@@ -18,6 +27,13 @@ __all__ = [
     "PatchError",
     "PatchProposal",
     "PatchService",
+    "DEFAULT_THEME_ID",
+    "THEMES",
+    "ReaderTheme",
+    "apply_color_scheme",
+    "build_gtk_theme_css",
+    "get_theme",
+    "normalize_theme_id",
     "WorkspaceError",
     "WorkspaceService",
     "WorkspaceWatcher",

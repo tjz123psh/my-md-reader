@@ -16,6 +16,7 @@ This is the live project state. Update it after each coherent milestone.
 - [x] Add `Adw.Application` lifecycle and global actions.
 - [x] Add adaptive Files / Reader / AI composition.
 - [x] Add native empty state, primary menu and keyboard shortcuts.
+- [x] Open either one Markdown document or a folder workspace from the UI.
 - [x] Add GSettings for window/session/zoom state.
 - [x] Build and launch the real binary.
 
@@ -38,6 +39,8 @@ This is the live project state. Update it after each coherent milestone.
 - [x] Implement outline navigation.
 - [x] Track and highlight the active outline heading while scrolling.
 - [x] Implement document search and 75–200% zoom.
+- [x] Add five unified GTK/WebKit reading themes with legacy migration.
+- [x] Commit wheel zoom once per frame with source-block anchoring.
 - [x] Add mixed-content renderer fixtures and unit tests.
 
 ## Milestone 4 — selection-aware AI
@@ -49,6 +52,7 @@ This is the live project state. Update it after each coherent milestone.
 - [x] Implement the editorial context rail and source jump-back.
 - [x] Add model selection without storing credentials.
 - [x] Render assistant Markdown with syntax color and a Thinking state.
+- [x] Preserve Fcitx/Chinese IME preedit in the multiline AI composer.
 
 ## Milestone 5 — safe AI file changes
 
@@ -72,10 +76,10 @@ This is the live project state. Update it after each coherent milestone.
 
 ## Current handoff
 
-Updated 2026-07-17. The repository is initialized on `main` with the GitHub
+Updated 2026-07-18. The repository is initialized on `main` with the GitHub
 `origin` configured. The native reader, workspace navigation, selection-aware
 OpenCode conversation and selected-line diff workflow are functional. There are
-55 passing unit tests plus successful Meson compile/test runs.
+63 passing unit tests plus successful Meson compile/test runs.
 
 OpenCode 1.18.2 must remain isolated through both the injected deny-all agent
 and the private temporary runtime directory. Do not change it back to
@@ -105,7 +109,7 @@ plus the real About dialog confirmed GTK resolves the icon. The source render is
 in `/tmp/mdreader-icon-512.png` and the About acceptance screenshot is
 `/tmp/mdreader-icon-about-960.png`.
 
-There are now 55 passing unit tests plus successful compileall, JavaScript
+There are now 63 passing unit tests plus successful compileall, JavaScript
 syntax and four Meson tests. The GTK smoke waits for a real WebKit
 `document-presented` signal and covers both normal and missing-OpenCode startup;
 it skips only when no graphical D-Bus session is available or another MD Reader
@@ -168,7 +172,42 @@ Clean Niri acceptance at 640, 960, 1280 and 1920px is in
 
 The full-width `GtkSearchBar` and its window-level key capture were removed;
 document search now opens from a compact popover button at the left side of the
-main header. Discrete mouse wheels use a 150 ms cubic interpolation while
-small touchpad deltas remain native. Each 5-point zoom gesture is completed in
-three anchored layout frames (2% + 2% + 1%), with the real WebKit smoke still
-requiring the final 105% value.
+main header. Discrete mouse wheels use a 150 ms cubic interpolation for ordinary
+scrolling while small touchpad deltas remain native. Ctrl+wheel commits one
+final zoom per animation frame, anchors the source block under the pointer and
+keeps each discrete wheel event to one 5-point step. The real WebKit smoke
+requires and receives the final 105% value.
+
+The 2026-07-18 reader-input pass adds five product-wide themes: Warm Paper,
+Mist Blue, Sage Leaf, Midnight Ink and Plum Night. One `ReaderTheme` token set
+now drives the libadwaita shell, library/outline, AI panel and WebKit reader;
+legacy `system`, `warm-light` and `warm-dark` settings migrate to visible
+choices. A D-Bus activation check changed Warm Paper to Plum Night in the real
+window, updated the stateful radio action and persisted the new GSettings value.
+Five 960px theme screenshots are in `/tmp/mdreader-four-fixes/theme-windows/`.
+Assistant Markdown now consumes the same theme syntax tokens instead of a
+separate light/dark palette, and theme changes re-render both the current reply
+and earlier assistant messages so inline code cannot retain stale colors.
+
+The AI composer no longer owns a general key controller. Only local
+`Ctrl+Enter`/`Ctrl+KP_Enter` shortcuts are registered, leaving ordinary keys,
+Enter and IME preedit with `GtkTextView`. On the recorded Fcitx5 session,
+`bootstrap.py` selects the installed GTK4 Fcitx bridge before GTK initialization
+when no explicit `GTK_IM_MODULE` override exists. Unit coverage verifies both
+automatic selection and preservation of user overrides.
+
+The open flow now exposes a Markdown `GtkFileDialog`, keeps folder opening as a
+separate action, and maps `Ctrl+O` to a single document plus `Ctrl+Shift+O` to a
+folder. A selected file still uses its parent as the canonical workspace root,
+so the existing tree, AI context and patch containment rules remain intact.
+
+Wheel zoom now avoids the visible 2% + 2% + 1% reflow sequence. The JavaScript
+bridge coalesces events into one animation-frame commit and repositions the
+source-mapped block under the pointer after layout. A real smoke regression
+caught and fixed discrete `deltaY=-100` being misread as four impulses; the
+final implementation treats it as exactly 100% → 105%. The full suite is 63
+unit tests, four passing Meson tests including GTK startup with and without
+OpenCode, plus Blueprint, schema, JavaScript and Python syntax checks. Fresh
+Niri acceptance covers 634, 954, 1273 and 1912px tiles, all five themes, a 960px
+AI overlay, high contrast and 200% text scaling; screenshots are under
+`/tmp/mdreader-four-fixes/`.

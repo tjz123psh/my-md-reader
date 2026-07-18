@@ -4,7 +4,8 @@
 
 - **Subject:** a quiet local reading desk for Markdown, not a mini IDE.
 - **Audience:** Linux users reading project notes and technical documentation.
-- **Primary job:** open a folder and read one Markdown document comfortably.
+- **Primary job:** open one Markdown document directly or browse its folder,
+  then read comfortably.
 
 File navigation and AI conversation support that job. They must never make the
 document feel like the center column of a generic dashboard.
@@ -15,23 +16,26 @@ The metaphor is a well-used reading desk: warm paper, dark graphite ink,
 muted cloth and colored editorial marks. The shell remains mostly native
 libadwaita. The document surface is allowed a stronger reading identity.
 
-### Core light tokens
+### Unified theme system
 
-| Token | Value | Use |
-|---|---:|---|
-| Linen | `#E8DDCB` | secondary shell/panel warmth |
-| Paper | `#F8F3E9` | document surface |
-| Graphite | `#2F2926` | primary document text |
-| Faded ink | `#74685F` | metadata and secondary text |
-| Mulberry | `#7A4651` | links, selection/context rail |
-| Moss | `#68705A` | AI/context confirmation and focus accent |
+A theme is one product-wide token set, not an independent WebKit skin. The
+window shell, file tree, outline, AI transcript/composer and Markdown document
+must change together. `ReaderTheme` is the single source of truth; it generates
+GTK CSS and supplies the same reader variables to WebKit.
 
-Dark equivalents must preserve relationships rather than invert mechanically:
-desk `#1F1C1A`, paper `#292522`, ink `#E9E0D2`, muted `#B6AA9D`, mulberry
-`#C58A98`, moss `#AAB596`.
+| Theme | Shell | Sidebar | Paper | Ink | Accent | Support |
+|---|---:|---:|---:|---:|---:|---:|
+| Warm Paper | `#E8DDCB` | `#EFE6D8` | `#F8F3E9` | `#2F2926` | `#7A4651` | `#68705A` |
+| Mist Blue | `#DCE5E8` | `#E7EEF0` | `#F7FAFA` | `#26343A` | `#3F6F83` | `#617A70` |
+| Sage Leaf | `#DDE4D7` | `#E8EDE3` | `#F6F7F1` | `#2B342B` | `#4F715E` | `#8A6948` |
+| Midnight Ink | `#171C23` | `#1D2530` | `#222A35` | `#E7ECF2` | `#7FB4D4` | `#8FC3A4` |
+| Plum Night | `#241B22` | `#2C222A` | `#33282F` | `#F0E4EA` | `#D69AAA` | `#B8C49B` |
 
-Native controls use libadwaita semantic colors. Hard-coded document colors are
-scoped to the WebKit reader and have explicit light/dark/high-contrast rules.
+Warm Paper is the default long-reading theme. Mist Blue and Sage Leaf provide
+cool and botanical light alternatives; Midnight Ink and Plum Night are dark
+without mechanically inverting the light palettes. Each theme also defines
+muted text, code, rule, selection and syntax-highlight colors. No theme may
+load network assets or replace native focus/accessibility behavior.
 
 ### Typography
 
@@ -148,9 +152,11 @@ Breakpoints are initially 760sp and 1120sp.
 
 ## Interaction rules
 
-- `Ctrl+O`: open folder.
+- `Ctrl+O`: open a Markdown document.
+- `Ctrl+Shift+O`: open a Markdown folder/workspace.
 - `Ctrl+F`: find in document.
-- `Ctrl+mouse wheel`: document-only zoom, anchored near the pointer.
+- `Ctrl+mouse wheel`: document-only zoom, one 5-point layout commit per
+  discrete wheel event and anchored to the source block near the pointer.
 - `Ctrl+Shift+A`: toggle/focus AI panel.
 - `Escape`: close an overlay or clear selection context, depending on focus.
 - Clicking an outline entry scrolls to the heading without reloading.
@@ -170,8 +176,8 @@ Breakpoints are initially 760sp and 1120sp.
 
 ## Empty and error states
 
-- Empty app: folder symbol, “Open a folder of Markdown files”, one “Open
-  Folder” suggested action.
+- Empty app: document symbol, “Open a Markdown document”, a suggested “Open
+  Document” action and a secondary “Open Folder” action.
 - Folder with no Markdown: explain that no `.md`/`.markdown` files were found
   and allow choosing another folder.
 - AI unavailable: small status page inside the AI pane; never cover the reader.
@@ -192,6 +198,7 @@ interaction without competing with long-form text.
 - No forced minimum width larger than the compact preset.
 - Focus order follows Files → Reader → AI in wide mode.
 - All icon-only buttons have tooltips and accessible labels.
+- Theme switching keeps shell, navigation, AI and reader in one palette.
 - High contrast does not depend on the warm palette.
 - 200% text scaling remains navigable.
 - Reader selection and AI quote clearly express the same source relationship.

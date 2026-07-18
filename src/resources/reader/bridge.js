@@ -151,62 +151,81 @@
     return zoomBounds(Math.round((Number.isFinite(value) ? value : 1) * 100));
   };
 
-  const setZoom = (percent, anchorY = null) => {
+  const setZoom = (percent, anchorY = null, anchorX = null) => {
     const bounded = zoomBounds(percent);
     const target = document.body || document.documentElement;
-    const viewportAnchor = anchorY != null && Number.isFinite(Number(anchorY))
+    const viewportAnchorY = anchorY != null && Number.isFinite(Number(anchorY))
       ? Math.max(0, Math.min(window.innerHeight, Number(anchorY)))
       : window.innerHeight / 2;
+    const viewportAnchorX = anchorX != null && Number.isFinite(Number(anchorX))
+      ? Math.max(0, Math.min(window.innerWidth, Number(anchorX)))
+      : window.innerWidth / 2;
+    const anchorNode = document.elementFromPoint(viewportAnchorX, viewportAnchorY);
+    const anchorBlock = anchorNode?.closest?.("[data-source-start]") || anchorNode;
+    const oldRect = anchorBlock?.getBoundingClientRect?.();
+    const anchorRatio = oldRect && oldRect.height > 0
+      ? Math.max(0, Math.min(1, (viewportAnchorY - oldRect.top) / oldRect.height))
+      : null;
     const oldHeight = document.documentElement.scrollHeight;
-    const oldAnchor = window.scrollY + viewportAnchor;
+    const oldAnchor = window.scrollY + viewportAnchorY;
 
-    // The initial zoom is an inline body property, so updates must target the
-    // body as well. Reading scrollHeight after the write forces the new layout.
     target.style.setProperty("--reader-zoom", String(bounded / 100));
-    const newHeight = document.documentElement.scrollHeight;
-    if (oldHeight > 0 && newHeight !== oldHeight) {
-      window.scrollTo({
-        top: (oldAnchor / oldHeight) * newHeight - viewportAnchor,
-        behavior: "auto",
-      });
+
+    const newRect = anchorBlock?.getBoundingClientRect?.();
+    if (anchorRatio != null && newRect && newRect.height > 0) {
+      const newAnchorY = newRect.top + newRect.height * anchorRatio;
+      window.scrollBy({ top: newAnchorY - viewportAnchorY, behavior: "auto" });
+    } else {
+      const newHeight = document.documentElement.scrollHeight;
+      if (oldHeight > 0 && newHeight !== oldHeight) {
+        window.scrollTo({
+          top: (oldAnchor / oldHeight) * newHeight - viewportAnchorY,
+          behavior: "auto",
+        });
+      }
     }
     scheduleActiveHeading();
     return bounded;
   };
 
-  const zoomStep = 1;
+  const setTheme = (tokens) => {
+    if (!tokens || typeof tokens !== "object") return;
+    const target = document.documentElement;
+    Object.entries(tokens).forEach(([name, value]) => {
+      if (/^--[a-z0-9-]+$/.test(name) && typeof value === "string") {
+        target.style.setProperty(name, value);
+      }
+    });
+  };
+
   const zoomImpulse = 5;
-  const zoomFrameStepLimit = 2;
   const zoomWheelThreshold = 24;
   let zoomWheelDelta = 0;
   let zoomWheelDirection = 0;
-  let pendingZoomSteps = 0;
+  let pendingZoomDelta = 0;
   let zoomFrame = 0;
   let zoomAnchorY = null;
+  let zoomAnchorX = null;
 
-  const flushZoomStep = () => {
+  const flushZoom = () => {
     zoomFrame = 0;
-    const direction = Math.sign(pendingZoomSteps);
-    if (!direction) return;
-    const frameSteps = Math.min(zoomFrameStepLimit, Math.abs(pendingZoomSteps));
-    pendingZoomSteps -= direction * frameSteps;
+    const delta = pendingZoomDelta;
+    pendingZoomDelta = 0;
+    if (!delta) return;
 
     const current = currentZoom();
-    const requested = zoomBounds(current + direction * zoomStep * frameSteps);
+    const requested = zoomBounds(current + delta);
     if (requested !== current) {
-      setZoom(requested, zoomAnchorY);
+      setZoom(requested, zoomAnchorY, zoomAnchorX);
       window.webkit?.messageHandlers?.zoom?.postMessage(JSON.stringify({
         percent: requested,
         anchorY: zoomAnchorY,
       }));
     }
-    if (pendingZoomSteps) {
-      zoomFrame = window.requestAnimationFrame(flushZoomStep);
-    }
   };
 
-  const scheduleZoomStep = () => {
-    if (!zoomFrame) zoomFrame = window.requestAnimationFrame(flushZoomStep);
+  const scheduleZoom = () => {
+    if (!zoomFrame) zoomFrame = window.requestAnimationFrame(flushZoom);
   };
 
   window.addEventListener("wheel", (event) => {
@@ -233,20 +252,28 @@
     const direction = delta < 0 ? 1 : -1;
     if (direction !== zoomWheelDirection) {
       zoomWheelDelta = 0;
+      pendingZoomDelta = 0;
       zoomWheelDirection = direction;
     }
-    zoomWheelDelta += Math.abs(delta);
-    if (zoomWheelDelta < zoomWheelThreshold) return;
-    zoomWheelDelta = 0;
-    if (pendingZoomSteps && Math.sign(pendingZoomSteps) !== direction) {
-      pendingZoomSteps = 0;
+    const discreteWheel = (
+      event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || Math.abs(delta) >= 32
+    );
+    let impulses = 1;
+    if (discreteWheel) {
+      zoomWheelDelta = 0;
+    } else {
+      zoomWheelDelta += Math.abs(delta);
+      impulses = Math.floor(zoomWheelDelta / zoomWheelThreshold);
+      if (!impulses) return;
+      zoomWheelDelta %= zoomWheelThreshold;
     }
-    pendingZoomSteps = Math.max(
+    pendingZoomDelta = Math.max(
       -20,
-      Math.min(20, pendingZoomSteps + direction * zoomImpulse),
+      Math.min(20, pendingZoomDelta + direction * zoomImpulse * impulses),
     );
     zoomAnchorY = event.clientY;
-    scheduleZoomStep();
+    zoomAnchorX = event.clientX;
+    scheduleZoom();
   }, { passive: false });
 
   const motionBehavior = prefersReducedMotion
@@ -255,6 +282,7 @@
 
   window.mdReader = {
     setZoom,
+    setTheme,
     scrollToHeading(id) {
       const target = document.getElementById(id);
       if (target) target.scrollIntoView({ block: "start", behavior: motionBehavior });

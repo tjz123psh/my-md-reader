@@ -4,6 +4,8 @@ import html
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from mdreader.services.themes import DEFAULT_THEME_ID, ReaderTheme, get_theme
+
 
 @dataclass(frozen=True, slots=True)
 class AiMarkdownCell:
@@ -23,26 +25,13 @@ class AiMarkdownBlock:
 class AiMarkdownRenderer:
     """Convert assistant Markdown into safe, native-widget-friendly blocks."""
 
-    LIGHT = {
-        "accent": "#7a4651",
-        "moss": "#68705a",
-        "number": "#9a653f",
-        "muted": "#74685f",
-        "name": "#526f86",
-        "operator": "#785f76",
-        "code_bg": "#e9dfd1",
-    }
-    DARK = {
-        "accent": "#c58a98",
-        "moss": "#aab596",
-        "number": "#d5a06d",
-        "muted": "#b6aa9d",
-        "name": "#9cb8cc",
-        "operator": "#c7a1c0",
-        "code_bg": "#211e1c",
-    }
-
-    def render(self, source: str, *, dark: bool = False) -> tuple[AiMarkdownBlock, ...]:
+    def render(
+        self,
+        source: str,
+        *,
+        theme: ReaderTheme | None = None,
+        dark: bool = False,
+    ) -> tuple[AiMarkdownBlock, ...]:
         try:
             from markdown_it import MarkdownIt
 
@@ -54,7 +43,16 @@ class AiMarkdownRenderer:
         except Exception:
             return (AiMarkdownBlock("paragraph", html.escape(source)),) if source else ()
 
-        palette = self.DARK if dark else self.LIGHT
+        selected_theme = theme or get_theme("plum-night" if dark else DEFAULT_THEME_ID)
+        palette = {
+            "accent": selected_theme.syntax_keyword,
+            "moss": selected_theme.syntax_string,
+            "number": selected_theme.syntax_number,
+            "muted": selected_theme.syntax_comment,
+            "name": selected_theme.syntax_name,
+            "operator": selected_theme.syntax_operator,
+            "code_bg": selected_theme.code_bg,
+        }
         blocks: list[AiMarkdownBlock] = []
         heading_level = 0
         quote_depth = 0

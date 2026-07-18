@@ -56,8 +56,14 @@ template $MdReaderWindow: Adw.ApplicationWindow {
 menu primary_menu {
   section {
     item {
+      label: "Open Document…";
+      action: "win.open-document";
+      icon: "document-open-symbolic";
+    }
+    item {
       label: "Open Folder…";
       action: "win.open-folder";
+      icon: "folder-open-symbolic";
     }
     item {
       label: "Find in Document";
@@ -80,6 +86,35 @@ menu primary_menu {
     item {
       label: "Actual Size";
       action: "win.zoom-reset";
+    }
+  }
+  submenu {
+    label: "Reading Theme";
+    icon: "applications-graphics-symbolic";
+    item {
+      label: "Warm Paper";
+      action: "win.select-theme";
+      target: "warm-paper";
+    }
+    item {
+      label: "Mist Blue";
+      action: "win.select-theme";
+      target: "mist-blue";
+    }
+    item {
+      label: "Sage Leaf";
+      action: "win.select-theme";
+      target: "sage-leaf";
+    }
+    item {
+      label: "Midnight Ink";
+      action: "win.select-theme";
+      target: "midnight-ink";
+    }
+    item {
+      label: "Plum Night";
+      action: "win.select-theme";
+      target: "plum-night";
     }
   }
   section {

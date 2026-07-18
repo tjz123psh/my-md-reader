@@ -8,13 +8,13 @@ from pathlib import Path
 import gi
 
 gi.require_version("Adw", "1")
-gi.require_version("Gdk", "4.0")
 gi.require_version("Gio", "2.0")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
+from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
 from mdreader.models import DocumentSelection
 from mdreader.services.ai_markdown import AiMarkdownBlock, AiMarkdownRenderer
+from mdreader.services.themes import ReaderTheme
 
 
 class AiPanel(Gtk.Box):
@@ -25,6 +25,7 @@ class AiPanel(Gtk.Box):
         on_cancel: Callable[[], None],
         *,
         current_model: str,
+        theme: ReaderTheme,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("ai-pane")
@@ -38,9 +39,11 @@ class AiPanel(Gtk.Box):
         self._thinking_row: Gtk.Box | None = None
         self._assistant_text = ""
         self._last_rendered_text = ""
+        self._assistant_history: list[tuple[Gtk.Box, str]] = []
         self._render_source_id = 0
         self._scroll_source_id = 0
         self._markdown = AiMarkdownRenderer()
+        self._theme = theme
         self._running = False
         self._available = (
             os.environ.get("MDREADER_TEST_OPENCODE_MISSING") != "1"
@@ -181,9 +184,14 @@ class AiPanel(Gtk.Box):
         self._prompt_view.update_property(
             [Gtk.AccessibleProperty.LABEL], ["AI prompt"]
         )
-        key_controller = Gtk.EventControllerKey()
-        key_controller.connect("key-pressed", self._on_prompt_key_pressed)
-        self._prompt_view.add_controller(key_controller)
+        shortcut_controller = Gtk.ShortcutController()
+        shortcut_controller.set_scope(Gtk.ShortcutScope.LOCAL)
+        send_action = Gtk.CallbackAction.new(self._on_prompt_send_shortcut)
+        for accelerator in ("<Control>Return", "<Control>KP_Enter"):
+            trigger = Gtk.ShortcutTrigger.parse_string(accelerator)
+            if trigger is not None:
+                shortcut_controller.add_shortcut(Gtk.Shortcut.new(trigger, send_action))
+        self._prompt_view.add_controller(shortcut_controller)
 
         prompt_scroll = Gtk.ScrolledWindow(
             hscrollbar_policy=Gtk.PolicyType.NEVER,
@@ -281,6 +289,7 @@ class AiPanel(Gtk.Box):
         self._thinking_row = None
         self._assistant_text = ""
         self._last_rendered_text = ""
+        self._assistant_history.clear()
         self._clear_box(self._transcript)
         self._status.set_icon_name("chat-symbolic")
         self._status.set_title(f"Using {label}")
@@ -312,6 +321,7 @@ class AiPanel(Gtk.Box):
         self._scroll_to_bottom()
 
     def begin_assistant(self, *, edit_mode: bool = False) -> None:
+        self._archive_current_assistant()
         self._hide_status()
         block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         label = Gtk.Label(label="OpenCode", xalign=0)
@@ -386,6 +396,14 @@ class AiPanel(Gtk.Box):
     def popup_model_menu(self) -> None:
         self._model_button.popup()
 
+    def refresh_theme(self, theme: ReaderTheme) -> None:
+        self._theme = theme
+        for content, text in self._assistant_history:
+            self._render_markdown_into(content, text)
+        if self._assistant_text and self._assistant_content is not None:
+            self._render_markdown_into(self._assistant_content, self._assistant_text)
+            self._last_rendered_text = self._assistant_text
+
     def _on_send_requested(self, _widget: Gtk.Widget) -> None:
         text = self._prompt_buffer.get_text(
             self._prompt_buffer.get_start_iter(),
@@ -418,17 +436,9 @@ class AiPanel(Gtk.Box):
         self._prompt_placeholder.set_visible(buffer.get_char_count() == 0)
         self._update_composer()
 
-    def _on_prompt_key_pressed(
-        self,
-        _controller: Gtk.EventControllerKey,
-        keyval: int,
-        _keycode: int,
-        state: Gdk.ModifierType,
+    def _on_prompt_send_shortcut(
+        self, _widget: Gtk.Widget, _args: GLib.Variant | None, _data: object
     ) -> bool:
-        if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            return False
-        if not state & Gdk.ModifierType.CONTROL_MASK:
-            return False
         self._on_send_requested(self._prompt_view)
         return True
 
@@ -470,13 +480,22 @@ class AiPanel(Gtk.Box):
             return GLib.SOURCE_REMOVE
         if self._assistant_text == self._last_rendered_text:
             return GLib.SOURCE_REMOVE
-        self._clear_box(self._assistant_content)
-        dark = Adw.StyleManager.get_default().get_dark()
-        for block in self._markdown.render(self._assistant_text, dark=dark):
-            self._assistant_content.append(self._markdown_block(block))
+        self._render_markdown_into(self._assistant_content, self._assistant_text)
         self._last_rendered_text = self._assistant_text
         self._scroll_to_bottom()
         return GLib.SOURCE_REMOVE
+
+    def _render_markdown_into(self, content: Gtk.Box, text: str) -> None:
+        self._clear_box(content)
+        for block in self._markdown.render(text, theme=self._theme):
+            content.append(self._markdown_block(block))
+
+    def _archive_current_assistant(self) -> None:
+        if self._assistant_content is None or not self._assistant_text:
+            return
+        if self._assistant_history and self._assistant_history[-1][0] is self._assistant_content:
+            return
+        self._assistant_history.append((self._assistant_content, self._assistant_text))
 
     def _markdown_block(self, block: AiMarkdownBlock) -> Gtk.Widget:
         if block.kind == "separator":

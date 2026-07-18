@@ -28,12 +28,18 @@
     </key>
     <key name="color-scheme" type="s">
       <choices>
+        <choice value="warm-paper" />
+        <choice value="mist-blue" />
+        <choice value="sage-leaf" />
+        <choice value="midnight-ink" />
+        <choice value="plum-night" />
+        <!-- Accepted for migration from releases before the five-theme picker. -->
         <choice value="system" />
         <choice value="warm-light" />
         <choice value="warm-dark" />
       </choices>
-      <default>'system'</default>
-      <summary>Reader color scheme</summary>
+      <default>'warm-paper'</default>
+      <summary>Unified application and reader theme</summary>
     </key>
     <key name="opencode-model" type="s">
       <default>''</default>
