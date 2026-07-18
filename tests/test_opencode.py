@@ -188,7 +188,7 @@ class OpenCodeGatewayTests(unittest.TestCase):
                 self.assertTrue(finished.wait(2))
 
             self.assertEqual(len(errors), 1)
-            self.assertIn("cancelled", str(errors[0]).lower())
+            self.assertIn("已取消", str(errors[0]))
             self.assertFalse(gateway.running)
 
     def test_subprocess_environment_isolates_agent_from_workspace_config(self) -> None:

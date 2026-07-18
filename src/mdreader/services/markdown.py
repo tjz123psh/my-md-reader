@@ -50,7 +50,7 @@ class MarkdownRenderer:
         self,
         source: str,
         *,
-        title: str = "Document",
+        title: str = "文档",
         zoom: int = 100,
         theme: ReaderTheme | None = None,
         document_path: Path | None = None,
@@ -61,7 +61,7 @@ class MarkdownRenderer:
             from markdown_it.rules_inline import StateInline
         except ImportError as error:
             raise MarkdownUnavailableError(
-                "markdown-it-py is required to render Markdown"
+                "需要安装 markdown-it-py 才能渲染 Markdown"
             ) from error
 
         del StateInline  # Imported as an early dependency/version sanity check.
@@ -167,7 +167,7 @@ class MarkdownRenderer:
             if blocked:
                 token.attrSet("src", "about:blank")
                 token.attrSet("data-blocked-source", source)
-                token.attrSet("title", "Remote or out-of-folder image blocked")
+                token.attrSet("title", "已阻止远程图片或文件夹外图片")
         for child in getattr(token, "children", None) or ():
             cls._harden_links(
                 child,
@@ -293,7 +293,7 @@ class MarkdownRenderer:
         bridge = self._read_asset("bridge.js")
         bounded_zoom = max(75, min(200, zoom))
         return f"""<!doctype html>
-<html lang="en" style="{theme.reader_inline_style()}">
+<html lang="zh-CN" style="{theme.reader_inline_style()}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

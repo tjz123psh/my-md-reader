@@ -64,8 +64,8 @@ class ReaderTheme:
 THEMES: tuple[ReaderTheme, ...] = (
     ReaderTheme(
         id="warm-paper",
-        name="Warm Paper",
-        description="Cream paper, graphite ink and mulberry marks",
+        name="暖纸",
+        description="奶油色纸张、石墨色文字与桑葚色标记",
         dark=False,
         shell="#E8DDCB",
         sidebar="#EFE6D8",
@@ -87,8 +87,8 @@ THEMES: tuple[ReaderTheme, ...] = (
     ),
     ReaderTheme(
         id="mist-blue",
-        name="Mist Blue",
-        description="Cool daylight with blue editorial accents",
+        name="雾蓝",
+        description="清凉日光与蓝色编辑标记",
         dark=False,
         shell="#DCE5E8",
         sidebar="#E7EEF0",
@@ -110,8 +110,8 @@ THEMES: tuple[ReaderTheme, ...] = (
     ),
     ReaderTheme(
         id="sage-leaf",
-        name="Sage Leaf",
-        description="Soft green cloth and calm botanical ink",
+        name="鼠尾草",
+        description="柔和绿布与沉静植物墨色",
         dark=False,
         shell="#DDE4D7",
         sidebar="#E8EDE3",
@@ -133,8 +133,8 @@ THEMES: tuple[ReaderTheme, ...] = (
     ),
     ReaderTheme(
         id="midnight-ink",
-        name="Midnight Ink",
-        description="Deep blue-black desk with clear cool type",
+        name="午夜墨",
+        description="深蓝黑桌面与清晰冷色文字",
         dark=True,
         shell="#171C23",
         sidebar="#1D2530",
@@ -156,8 +156,8 @@ THEMES: tuple[ReaderTheme, ...] = (
     ),
     ReaderTheme(
         id="plum-night",
-        name="Plum Night",
-        description="Warm charcoal with plum and moss highlights",
+        name="梅夜",
+        description="暖炭底色与梅红、苔绿色高光",
         dark=True,
         shell="#241B22",
         sidebar="#2C222A",

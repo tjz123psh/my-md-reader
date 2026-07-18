@@ -150,6 +150,13 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("<Control>Return", source)
         self.assertNotIn("Gtk.EventControllerKey()", source)
         self.assertIn("Gtk.TextView(", source)
+        self.assertIn('label="AI 助手"', source)
+        self.assertIn("询问这篇文档", source)
+        self.assertIn("Gtk.InputPurpose.FREE_FORM", source)
+        self.assertIn('connect("notify::has-focus"', source)
+        self.assertIn("def _sync_prompt_placeholder", source)
+        self.assertIn("def _update_send_button", source)
+        self.assertNotIn("self._prompt_placeholder.set_visible(buffer.get_char_count()", source)
         self.assertIn("self._assistant_history", source)
         self.assertIn("for content, text in self._assistant_history", source)
         self.assertIn("theme=self._theme", source)
@@ -169,7 +176,8 @@ class MarkdownRendererTests(unittest.TestCase):
         blueprint = (
             Path(__file__).parents[1] / "src/resources/ui/window.blp"
         ).read_text(encoding="utf-8")
-        self.assertIn('label: "Reading Theme"', blueprint)
+        self.assertIn('label: "阅读主题"', blueprint)
+        self.assertIn('label: "打开文档…"', blueprint)
         for theme_id in (
             "warm-paper",
             "mist-blue",

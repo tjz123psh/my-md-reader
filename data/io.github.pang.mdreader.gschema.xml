@@ -3,28 +3,28 @@
   <schema id="io.github.pang.mdreader" path="/io/github/pang/mdreader/">
     <key name="window-width" type="i">
       <default>1200</default>
-      <summary>Window width</summary>
+      <summary>窗口宽度</summary>
     </key>
     <key name="window-height" type="i">
       <default>800</default>
-      <summary>Window height</summary>
+      <summary>窗口高度</summary>
     </key>
     <key name="window-maximized" type="b">
       <default>false</default>
-      <summary>Whether the window is maximized</summary>
+      <summary>窗口是否最大化</summary>
     </key>
     <key name="last-workspace" type="s">
       <default>''</default>
-      <summary>Last workspace path</summary>
+      <summary>上次打开的工作区路径</summary>
     </key>
     <key name="last-document" type="s">
       <default>''</default>
-      <summary>Last document path relative to the workspace</summary>
+      <summary>上次打开的文档相对工作区的路径</summary>
     </key>
     <key name="document-zoom" type="i">
       <range min="75" max="200" />
       <default>100</default>
-      <summary>Document zoom percentage</summary>
+      <summary>文档缩放百分比</summary>
     </key>
     <key name="color-scheme" type="s">
       <choices>
@@ -39,11 +39,11 @@
         <choice value="warm-dark" />
       </choices>
       <default>'warm-paper'</default>
-      <summary>Unified application and reader theme</summary>
+      <summary>应用与阅读器的统一主题</summary>
     </key>
     <key name="opencode-model" type="s">
       <default>''</default>
-      <summary>Last selected OpenCode model identifier</summary>
+      <summary>上次选择的 OpenCode 模型标识符</summary>
     </key>
   </schema>
 </schemalist>

@@ -3,15 +3,21 @@
   <id>io.github.pang.mdreader</id>
   <name>MD Reader</name>
   <summary>Read local Markdown in a focused workspace</summary>
+  <summary xml:lang="zh_CN">在专注的工作区中阅读本地 Markdown</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <developer id="io.github.pang">
     <name>MD Reader contributors</name>
+    <name xml:lang="zh_CN">MD Reader 贡献者</name>
   </developer>
   <description>
     <p>
       MD Reader is a read-only Markdown workspace with a file tree, document
       outline, warm long-form typography and an optional OpenCode assistant.
+    </p>
+    <p xml:lang="zh_CN">
+      MD Reader 是一个只读 Markdown 工作区，提供文件树、文档大纲、舒适的
+      长文排版，以及可选的 OpenCode AI 助手。
     </p>
   </description>
   <launchable type="desktop-id">io.github.pang.mdreader.desktop</launchable>

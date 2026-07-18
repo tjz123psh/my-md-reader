@@ -51,6 +51,18 @@ class InputMethodBootstrapTests(unittest.TestCase):
             configure_gtk_input_method()
             self.assertEqual(os.environ.get("GTK_IM_MODULE"), "fcitx")
 
+    def test_wayland_uses_gtk_native_input_method(self) -> None:
+        environment = {
+            "WAYLAND_DISPLAY": "wayland-1",
+            "XMODIFIERS": "@im=fcitx",
+            "QT_IM_MODULE": "fcitx",
+        }
+        with patch.dict(os.environ, environment, clear=True), patch(
+            "mdreader.bootstrap._fcitx_gtk4_module_available", return_value=True
+        ):
+            configure_gtk_input_method()
+            self.assertIsNone(os.environ.get("GTK_IM_MODULE"))
+
     def test_explicit_gtk_input_method_is_preserved(self) -> None:
         with patch.dict(os.environ, {"GTK_IM_MODULE": "wayland"}, clear=True), patch(
             "mdreader.bootstrap._fcitx_gtk4_module_available", return_value=True

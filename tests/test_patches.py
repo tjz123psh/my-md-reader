@@ -75,7 +75,7 @@ class PatchServiceTests(unittest.TestCase):
     def test_propose_rejects_file_changed_during_model_response(self) -> None:
         original_hash = self.base_hash()
         self.path.write_text("one\nexternally changed\nthree\n", encoding="utf-8")
-        with self.assertRaisesRegex(PatchError, "while OpenCode was preparing"):
+        with self.assertRaisesRegex(PatchError, "OpenCode 生成建议期间"):
             self.service.propose(
                 self.path,
                 expected_start=2,
@@ -88,7 +88,7 @@ class PatchServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as other:
             outside = Path(other) / "outside.md"
             outside.write_text("one\ntwo\nthree\n", encoding="utf-8")
-            with self.assertRaisesRegex(PatchError, "outside the open workspace"):
+            with self.assertRaisesRegex(PatchError, "当前工作区之外"):
                 self.service.propose(
                     outside,
                     expected_start=2,
@@ -103,7 +103,7 @@ class PatchServiceTests(unittest.TestCase):
             outside.write_text("one\ntwo\nthree\n", encoding="utf-8")
             link = self.path.parent / "linked.md"
             link.symlink_to(outside)
-            with self.assertRaisesRegex(PatchError, "outside the open workspace"):
+            with self.assertRaisesRegex(PatchError, "当前工作区之外"):
                 self.service.propose(
                     link,
                     expected_start=2,

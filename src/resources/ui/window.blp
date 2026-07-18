@@ -15,14 +15,14 @@ template $MdReaderWindow: Adw.ApplicationWindow {
         [start]
         Gtk.Button files_button {
           icon-name: "folder-symbolic";
-          tooltip-text: "Files and outline";
+          tooltip-text: "文件与大纲";
           action-name: "win.toggle-library";
         }
 
         [start]
         Gtk.MenuButton search_button {
           icon-name: "system-search-symbolic";
-          tooltip-text: "Find in document";
+          tooltip-text: "在文档中查找";
         }
 
         title-widget: Gtk.Label title_label {
@@ -36,14 +36,14 @@ template $MdReaderWindow: Adw.ApplicationWindow {
         [end]
         Gtk.Button ai_button {
           icon-name: "chat-symbolic";
-          tooltip-text: "AI assistant";
+          tooltip-text: "AI 助手";
           action-name: "win.toggle-ai";
         }
 
         [end]
         Gtk.MenuButton menu_button {
           icon-name: "open-menu-symbolic";
-          tooltip-text: "Main menu";
+          tooltip-text: "主菜单";
           menu-model: primary_menu;
         }
       }
@@ -56,70 +56,70 @@ template $MdReaderWindow: Adw.ApplicationWindow {
 menu primary_menu {
   section {
     item {
-      label: "Open Document…";
+      label: "打开文档…";
       action: "win.open-document";
       icon: "document-open-symbolic";
     }
     item {
-      label: "Open Folder…";
+      label: "打开文件夹…";
       action: "win.open-folder";
       icon: "folder-open-symbolic";
     }
     item {
-      label: "Find in Document";
+      label: "在文档中查找";
       action: "win.find";
     }
     item {
-      label: "Undo AI Change";
+      label: "撤销 AI 修改";
       action: "win.undo-ai-change";
     }
   }
   section {
     item {
-      label: "Zoom In";
+      label: "放大";
       action: "win.zoom-in";
     }
     item {
-      label: "Zoom Out";
+      label: "缩小";
       action: "win.zoom-out";
     }
     item {
-      label: "Actual Size";
+      label: "实际大小";
       action: "win.zoom-reset";
     }
   }
   submenu {
-    label: "Reading Theme";
+    label: "阅读主题";
     icon: "applications-graphics-symbolic";
     item {
-      label: "Warm Paper";
+      label: "暖纸";
       action: "win.select-theme";
       target: "warm-paper";
     }
     item {
-      label: "Mist Blue";
+      label: "雾蓝";
       action: "win.select-theme";
       target: "mist-blue";
     }
     item {
-      label: "Sage Leaf";
+      label: "鼠尾草";
       action: "win.select-theme";
       target: "sage-leaf";
     }
     item {
-      label: "Midnight Ink";
+      label: "午夜墨";
       action: "win.select-theme";
       target: "midnight-ink";
     }
     item {
-      label: "Plum Night";
+      label: "梅夜";
       action: "win.select-theme";
       target: "plum-night";
     }
   }
   section {
     item {
-      label: "About MD Reader";
+      label: "关于 MD Reader";
       action: "app.about";
     }
   }

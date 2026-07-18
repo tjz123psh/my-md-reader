@@ -53,6 +53,8 @@ This is the live project state. Update it after each coherent milestone.
 - [x] Add model selection without storing credentials.
 - [x] Render assistant Markdown with syntax color and a Thinking state.
 - [x] Preserve Fcitx/Chinese IME preedit in the multiline AI composer.
+- [x] Use native Wayland IME preedit without composer state churn.
+- [x] Translate primary navigation, AI controls, dialogs and errors to Chinese.
 
 ## Milestone 5 — safe AI file changes
 
@@ -76,10 +78,10 @@ This is the live project state. Update it after each coherent milestone.
 
 ## Current handoff
 
-Updated 2026-07-18. The repository is initialized on `main` with the GitHub
+Updated 2026-07-19. The repository is initialized on `main` with the GitHub
 `origin` configured. The native reader, workspace navigation, selection-aware
 OpenCode conversation and selected-line diff workflow are functional. There are
-63 passing unit tests plus successful Meson compile/test runs.
+64 passing unit tests plus successful Meson compile/test runs.
 
 OpenCode 1.18.2 must remain isolated through both the injected deny-all agent
 and the private temporary runtime directory. Do not change it back to
@@ -109,7 +111,7 @@ plus the real About dialog confirmed GTK resolves the icon. The source render is
 in `/tmp/mdreader-icon-512.png` and the About acceptance screenshot is
 `/tmp/mdreader-icon-about-960.png`.
 
-There are now 63 passing unit tests plus successful compileall, JavaScript
+There are now 64 passing unit tests plus successful compileall, JavaScript
 syntax and four Meson tests. The GTK smoke waits for a real WebKit
 `document-presented` signal and covers both normal and missing-OpenCode startup;
 it skips only when no graphical D-Bus session is available or another MD Reader
@@ -191,10 +193,10 @@ and earlier assistant messages so inline code cannot retain stale colors.
 
 The AI composer no longer owns a general key controller. Only local
 `Ctrl+Enter`/`Ctrl+KP_Enter` shortcuts are registered, leaving ordinary keys,
-Enter and IME preedit with `GtkTextView`. On the recorded Fcitx5 session,
-`bootstrap.py` selects the installed GTK4 Fcitx bridge before GTK initialization
-when no explicit `GTK_IM_MODULE` override exists. Unit coverage verifies both
-automatic selection and preservation of user overrides.
+Enter and IME preedit with `GtkTextView`. On the recorded Niri/Fcitx5 session,
+the GTK4 probe selects the native `wayland` input path, so `bootstrap.py` no
+longer forces the direct Fcitx module on Wayland; it retains that fallback for
+X11 and preserves explicit user overrides.
 
 The open flow now exposes a Markdown `GtkFileDialog`, keeps folder opening as a
 separate action, and maps `Ctrl+O` to a single document plus `Ctrl+Shift+O` to a
@@ -205,9 +207,17 @@ Wheel zoom now avoids the visible 2% + 2% + 1% reflow sequence. The JavaScript
 bridge coalesces events into one animation-frame commit and repositions the
 source-mapped block under the pointer after layout. A real smoke regression
 caught and fixed discrete `deltaY=-100` being misread as four impulses; the
-final implementation treats it as exactly 100% → 105%. The full suite is 63
+final implementation treats it as exactly 100% → 105%. The full suite is 64
 unit tests, four passing Meson tests including GTK startup with and without
 OpenCode, plus Blueprint, schema, JavaScript and Python syntax checks. Fresh
 Niri acceptance covers 634, 954, 1273 and 1912px tiles, all five themes, a 960px
 AI overlay, high contrast and 200% text scaling; screenshots are under
 `/tmp/mdreader-four-fixes/`.
+
+The 2026-07-19 Chinese-input pass removes the remaining IME reset path in the
+AI composer. Buffer changes now update only the send button, sensitivity is
+changed only when availability actually changes, and the custom placeholder is
+hidden while the editor has focus so it cannot overlap uncommitted preedit text
+and shake. The primary application UI, status pages, AI controls, theme names,
+file dialogs, diff approval and user-facing service errors now use Simplified
+Chinese; desktop and AppStream metadata include Chinese copy as well.

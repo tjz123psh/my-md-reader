@@ -10,6 +10,10 @@
 File navigation and AI conversation support that job. They must never make the
 document feel like the center column of a generic dashboard.
 
+The primary interface language is Simplified Chinese. Product names, model IDs,
+file names and code remain unchanged, while navigation, status, errors, AI
+controls and approval dialogs use concise Chinese copy.
+
 ## Visual direction
 
 The metaphor is a well-used reading desk: warm paper, dark graphite ink,

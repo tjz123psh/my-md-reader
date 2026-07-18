@@ -18,7 +18,10 @@ class DocumentContext:
     @property
     def location(self) -> str:
         if self.selection.start_line:
-            return f"{self.relative_path} · lines {self.selection.start_line}–{self.selection.end_line}"
+            return (
+                f"{self.relative_path} · 第 {self.selection.start_line}–"
+                f"{self.selection.end_line} 行"
+            )
         return str(self.relative_path)
 
 

@@ -109,9 +109,9 @@ class MdReaderApplication(Adw.Application):
             application_name="MD Reader",
             application_icon="io.github.pang.mdreader",
             version=__version__,
-            developer_name="MD Reader contributors",
+            developer_name="MD Reader 贡献者",
             license_type=Gtk.License.GPL_3_0,
-            comments="A focused, read-only Markdown workspace for Linux",
+            comments="专注、只读的 Linux Markdown 阅读工作区",
             website="https://github.com/tjz123psh/my-md-reader",
             issue_url="https://github.com/tjz123psh/my-md-reader/issues",
         )

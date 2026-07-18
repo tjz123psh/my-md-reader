@@ -48,8 +48,8 @@ class DocumentView(Gtk.Box):
 
         empty = Adw.StatusPage(
             icon_name="text-x-generic-symbolic",
-            title="Open a Markdown document",
-            description="Read one file directly, or open a folder as a workspace",
+            title="打开 Markdown 文档",
+            description="直接阅读单个文件，或将文件夹作为工作区打开",
         )
         open_actions = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
@@ -57,12 +57,12 @@ class DocumentView(Gtk.Box):
             halign=Gtk.Align.CENTER,
         )
         open_document = Gtk.Button(
-            label="Open Document", action_name="win.open-document"
+            label="打开文档", action_name="win.open-document"
         )
         open_document.add_css_class("pill")
         open_document.add_css_class("suggested-action")
         open_actions.append(open_document)
-        open_folder = Gtk.Button(label="Open Folder", action_name="win.open-folder")
+        open_folder = Gtk.Button(label="打开文件夹", action_name="win.open-folder")
         open_folder.add_css_class("pill")
         open_actions.append(open_folder)
         empty.set_child(open_actions)
@@ -70,20 +70,22 @@ class DocumentView(Gtk.Box):
 
         self._loading = Adw.StatusPage(
             icon_name="text-x-generic-symbolic",
-            title="Rendering document",
-            description="Preparing typography, outline and source locations…",
+            title="正在渲染文档",
+            description="正在准备排版、大纲和源码位置…",
         )
         self._stack.add_named(self._loading, "loading")
 
-        self._error = Adw.StatusPage(icon_name="dialog-error-symbolic", title="Could not render document")
+        self._error = Adw.StatusPage(
+            icon_name="dialog-error-symbolic", title="无法渲染文档"
+        )
         self._stack.add_named(self._error, "error")
 
         if WebKit is None:
             unavailable = Adw.StatusPage(
                 icon_name="dialog-warning-symbolic",
-                title="WebKitGTK 6 is required",
+                title="需要 WebKitGTK 6",
                 description=(
-                    "Install webkitgtk-6.0 to enable the high-quality Markdown reading surface"
+                    "请安装 webkitgtk-6.0 以启用高质量 Markdown 阅读界面"
                 ),
             )
             unavailable.add_css_class("reader-fallback")

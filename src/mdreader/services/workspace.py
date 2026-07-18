@@ -31,18 +31,18 @@ class WorkspaceService:
     def __init__(self, root: str | Path) -> None:
         candidate = Path(root).expanduser()
         if not candidate.exists():
-            raise WorkspaceError(f"Workspace does not exist: {candidate}")
+            raise WorkspaceError(f"工作区不存在：{candidate}")
         if not candidate.is_dir():
-            raise WorkspaceError(f"Workspace is not a directory: {candidate}")
+            raise WorkspaceError(f"工作区不是文件夹：{candidate}")
         self.root = candidate.resolve(strict=True)
 
     def resolve_relative(self, relative_path: str | Path) -> Path:
         relative = Path(relative_path)
         if relative.is_absolute():
-            raise WorkspaceError("Workspace paths must be relative")
+            raise WorkspaceError("工作区路径必须是相对路径")
         candidate = (self.root / relative).resolve(strict=False)
         if not candidate.is_relative_to(self.root):
-            raise WorkspaceError(f"Path escapes workspace: {relative}")
+            raise WorkspaceError(f"路径超出工作区：{relative}")
         return candidate
 
     def relative_path(self, path: str | Path) -> Path:
@@ -50,14 +50,14 @@ class WorkspaceService:
         try:
             return candidate.relative_to(self.root)
         except ValueError as error:
-            raise WorkspaceError(f"Path is outside workspace: {candidate}") from error
+            raise WorkspaceError(f"路径位于工作区之外：{candidate}") from error
 
     def validate_document(self, path: str | Path) -> Path:
         candidate = self.resolve_relative(path)
         if candidate.suffix.lower() not in MARKDOWN_SUFFIXES:
-            raise WorkspaceError(f"Not a Markdown document: {path}")
+            raise WorkspaceError(f"不是 Markdown 文档：{path}")
         if not candidate.is_file():
-            raise WorkspaceError(f"Document does not exist: {path}")
+            raise WorkspaceError(f"文档不存在：{path}")
         return candidate
 
     def scan(self) -> tuple[FileEntry, ...]:
@@ -71,7 +71,7 @@ class WorkspaceService:
                 key=lambda item: (not item.is_dir(), item.name.casefold()),
             )
         except OSError as error:
-            raise WorkspaceError(f"Could not read {directory}: {error}") from error
+            raise WorkspaceError(f"无法读取 {directory}：{error}") from error
 
         for child in children:
             if child.name.startswith(".") or child.name in IGNORED_DIRECTORIES:

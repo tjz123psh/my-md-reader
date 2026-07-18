@@ -253,9 +253,12 @@ Document search is a compact popover anchored to the left side of the main
 header. It does not install a window-level key-capture widget, so typing and
 IME preedit inside the AI prompt remain owned by the focused `GtkTextView`. The
 composer registers only local `Ctrl+Enter` shortcuts and does not intercept
-normal key events. Before importing GTK, `bootstrap.py` selects the installed
-Fcitx GTK4 bridge when the session advertises Fcitx and the user has not
-explicitly chosen another `GTK_IM_MODULE`.
+normal key events. On Wayland, `bootstrap.py` leaves `GTK_IM_MODULE` unset so
+GTK 4 uses the compositor's native text-input protocol, matching the result of
+the Fcitx5 GTK4 probe under Niri. The direct Fcitx GTK4 module remains an X11
+fallback, and an explicit user override is always preserved. Prompt edits only
+update the send button; they never reapply `GtkTextView` sensitivity while an
+IME preedit is active.
 
 ## 6. Failure behavior
 

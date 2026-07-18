@@ -51,7 +51,7 @@ class AiPanel(Gtk.Box):
         )
         self._models: tuple[str, ...] = ()
 
-        header_title = Gtk.Label(label="AI Assistant")
+        header_title = Gtk.Label(label="AI 助手")
         header_title.add_css_class("heading")
         self._model_label = Gtk.Label(
             ellipsize=Pango.EllipsizeMode.END,
@@ -73,9 +73,9 @@ class AiPanel(Gtk.Box):
             icon_name="window-close-symbolic",
             action_name="win.hide-ai",
         )
-        close_button.set_tooltip_text("Hide AI assistant")
+        close_button.set_tooltip_text("隐藏 AI 助手")
         close_button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Hide AI assistant"]
+            [Gtk.AccessibleProperty.LABEL], ["隐藏 AI 助手"]
         )
         header.pack_end(close_button)
 
@@ -85,9 +85,9 @@ class AiPanel(Gtk.Box):
             menu_model=self._model_menu,
             sensitive=False,
         )
-        self._model_button.set_tooltip_text("Choose OpenCode model")
+        self._model_button.set_tooltip_text("选择 OpenCode 模型")
         self._model_button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Choose OpenCode model"]
+            [Gtk.AccessibleProperty.LABEL], ["选择 OpenCode 模型"]
         )
         header.pack_end(self._model_button)
         self.set_current_model(current_model)
@@ -101,15 +101,15 @@ class AiPanel(Gtk.Box):
         self._mode_group = Adw.ToggleGroup()
         self._ask_mode = Adw.Toggle(
             name="ask",
-            label="Ask",
+            label="问答",
             icon_name="chat-symbolic",
-            tooltip="Discuss the current document without changing files",
+            tooltip="讨论当前文档，不修改文件",
         )
         self._edit_mode = Adw.Toggle(
             name="edit",
-            label="Edit",
+            label="修改",
             icon_name="document-edit-symbolic",
-            tooltip="Propose a reviewed change to the selected lines",
+            tooltip="针对选中的行提出可审核的修改",
         )
         self._mode_group.add(self._ask_mode)
         self._mode_group.add(self._edit_mode)
@@ -118,7 +118,7 @@ class AiPanel(Gtk.Box):
         content.append(self._mode_group)
 
         self._edit_banner = Adw.Banner(
-            title="Select text in the document before proposing a change"
+            title="请先在文档中选择文字，再提出修改要求"
         )
         self._edit_banner.set_revealed(False)
         content.append(self._edit_banner)
@@ -128,7 +128,7 @@ class AiPanel(Gtk.Box):
             reveal_child=False,
         )
         context_button = Gtk.Button(has_frame=False)
-        context_button.set_tooltip_text("Return to selected text")
+        context_button.set_tooltip_text("返回选中的文字")
         context_button.connect("clicked", self._on_context_clicked)
         context_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         context_box.add_css_class("context-rail")
@@ -158,11 +158,11 @@ class AiPanel(Gtk.Box):
 
         self._status = Adw.StatusPage(
             icon_name="chat-symbolic" if self._available else "network-offline-symbolic",
-            title="Discuss the current document" if self._available else "OpenCode unavailable",
+            title="讨论当前文档" if self._available else "OpenCode 不可用",
             description=(
-                "Ask about the current section or select text for precise context"
+                "询问当前章节，或选择文字以提供精确上下文"
                 if self._available
-                else "Install and configure OpenCode; reading remains fully available"
+                else "请安装并配置 OpenCode；文档阅读功能仍可正常使用"
             ),
         )
         self._transcript.append(self._status)
@@ -176,13 +176,18 @@ class AiPanel(Gtk.Box):
             wrap_mode=Gtk.WrapMode.WORD_CHAR,
             sensitive=False,
         )
+        self._prompt_view.set_input_purpose(Gtk.InputPurpose.FREE_FORM)
+        self._prompt_view.set_input_hints(
+            Gtk.InputHints.SPELLCHECK | Gtk.InputHints.WORD_COMPLETION
+        )
+        self._prompt_view.connect("notify::has-focus", self._on_prompt_focus_changed)
         self._prompt_view.add_css_class("ai-prompt")
         self._prompt_view.set_top_margin(10)
         self._prompt_view.set_bottom_margin(10)
         self._prompt_view.set_left_margin(10)
         self._prompt_view.set_right_margin(10)
         self._prompt_view.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["AI prompt"]
+            [Gtk.AccessibleProperty.LABEL], ["AI 输入框"]
         )
         shortcut_controller = Gtk.ShortcutController()
         shortcut_controller.set_scope(Gtk.ShortcutScope.LOCAL)
@@ -204,7 +209,7 @@ class AiPanel(Gtk.Box):
         prompt_overlay = Gtk.Overlay()
         prompt_overlay.set_child(prompt_scroll)
         self._prompt_placeholder = Gtk.Label(
-            label="Ask about this document or add instructions…",
+            label="询问这篇文档，或补充具体要求…",
             xalign=0,
             yalign=0,
             wrap=True,
@@ -223,7 +228,7 @@ class AiPanel(Gtk.Box):
             spacing=6,
         )
         composer_hint = Gtk.Label(
-            label="Ctrl+Enter to send",
+            label="Ctrl+Enter 发送",
             xalign=0,
             hexpand=True,
             ellipsize=Pango.EllipsizeMode.END,
@@ -237,9 +242,9 @@ class AiPanel(Gtk.Box):
             sensitive=False,
         )
         self._send_button.add_css_class("suggested-action")
-        self._send_button.set_tooltip_text("Send message")
+        self._send_button.set_tooltip_text("发送消息")
         self._send_button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Send message"]
+            [Gtk.AccessibleProperty.LABEL], ["发送消息"]
         )
         self._send_button.connect("clicked", self._on_send_requested)
         composer_actions.append(self._send_button)
@@ -248,9 +253,9 @@ class AiPanel(Gtk.Box):
             icon_name="process-stop-symbolic",
             visible=False,
         )
-        self._cancel_button.set_tooltip_text("Cancel response")
+        self._cancel_button.set_tooltip_text("停止回答")
         self._cancel_button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Cancel response"]
+            [Gtk.AccessibleProperty.LABEL], ["停止回答"]
         )
         self._cancel_button.connect("clicked", lambda *_: self._on_cancel())
         composer_actions.append(self._cancel_button)
@@ -292,8 +297,8 @@ class AiPanel(Gtk.Box):
         self._assistant_history.clear()
         self._clear_box(self._transcript)
         self._status.set_icon_name("chat-symbolic")
-        self._status.set_title(f"Using {label}")
-        self._status.set_description("Start a new conversation with this model")
+        self._status.set_title(f"正在使用 {label}")
+        self._status.set_description("使用此模型开始新对话")
         self._transcript.append(self._status)
 
     def set_selection(self, selection: DocumentSelection) -> None:
@@ -304,9 +309,9 @@ class AiPanel(Gtk.Box):
             self._update_composer()
             return
 
-        location = str(self._document) if self._document else "Current document"
+        location = str(self._document) if self._document else "当前文档"
         if selection.start_line > 0:
-            location += f" · lines {selection.start_line}–{selection.end_line}"
+            location += f" · 第 {selection.start_line}–{selection.end_line} 行"
         if selection.heading_title:
             location += f" · {selection.heading_title}"
         self._context_meta.set_label(location)
@@ -317,7 +322,7 @@ class AiPanel(Gtk.Box):
 
     def append_user(self, text: str) -> None:
         self._hide_status()
-        self._transcript.append(self._message_block("You", text, "user-message"))
+        self._transcript.append(self._message_block("你", text, "user-message"))
         self._scroll_to_bottom()
 
     def begin_assistant(self, *, edit_mode: bool = False) -> None:
@@ -334,9 +339,9 @@ class AiPanel(Gtk.Box):
         self._thinking_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
         self._thinking_row.add_css_class("ai-thinking")
         spinner = Adw.Spinner()
-        spinner.update_property([Gtk.AccessibleProperty.LABEL], ["OpenCode is thinking"])
+        spinner.update_property([Gtk.AccessibleProperty.LABEL], ["OpenCode 正在思考"])
         thinking_label = Gtk.Label(
-            label="Thinking about the selected change…" if edit_mode else "Thinking…",
+            label="正在准备选中内容的修改…" if edit_mode else "正在思考…",
             xalign=0,
         )
         thinking_label.add_css_class("caption")
@@ -419,10 +424,11 @@ class AiPanel(Gtk.Box):
     def _on_mode_changed(self, group: Adw.ToggleGroup, _param: object) -> None:
         edit_mode = group.get_active_name() == "edit"
         self._prompt_placeholder.set_label(
-            "Select text, then describe the change you want…"
+            "选择文档文字，然后描述你想要的修改…"
             if edit_mode
-            else "Ask about this document or add instructions…"
+            else "询问这篇文档，或补充具体要求…"
         )
+        self._sync_prompt_placeholder()
         self._update_mode_hint()
         self._update_composer()
 
@@ -433,8 +439,20 @@ class AiPanel(Gtk.Box):
         )
 
     def _on_prompt_changed(self, buffer: Gtk.TextBuffer) -> None:
-        self._prompt_placeholder.set_visible(buffer.get_char_count() == 0)
-        self._update_composer()
+        self._sync_prompt_placeholder()
+        self._update_send_button()
+
+    def _on_prompt_focus_changed(self, _view: Gtk.TextView, _param: object) -> None:
+        self._sync_prompt_placeholder()
+
+    def _sync_prompt_placeholder(self) -> None:
+        # Hide the overlay as soon as the editor receives focus. IME preedit is
+        # not part of GtkTextBuffer yet, so checking only char_count leaves the
+        # placeholder competing with the composition text and visibly shaking.
+        self._prompt_placeholder.set_visible(
+            self._prompt_buffer.get_char_count() == 0
+            and not self._prompt_view.has_focus()
+        )
 
     def _on_prompt_send_shortcut(
         self, _widget: Gtk.Widget, _args: GLib.Variant | None, _data: object
@@ -454,20 +472,33 @@ class AiPanel(Gtk.Box):
 
     def _update_composer(self) -> None:
         enabled = self._available and self._document is not None and not self._running
-        edit_ready = (
-            self._mode_group.get_active_name() != "edit"
-            or not self._selection.is_empty
-        )
-        self._prompt_view.set_sensitive(enabled)
-        self._send_button.set_sensitive(
-            enabled
-            and edit_ready
-            and self._prompt_buffer.get_char_count() > 0
-        )
+        # Re-applying sensitivity while GtkTextView owns an IME composition can
+        # reset its input context. Only touch the property when availability
+        # actually changes; prompt edits update the send button alone.
+        if self._prompt_view.get_sensitive() != enabled:
+            self._prompt_view.set_sensitive(enabled)
+        self._update_send_button(enabled)
         self._mode_group.set_sensitive(enabled)
         self._edit_mode.set_enabled(enabled)
         self._model_button.set_sensitive(
             self._available and bool(self._models) and not self._running
+        )
+
+    def _update_send_button(self, enabled: bool | None = None) -> None:
+        if enabled is None:
+            enabled = (
+                self._available
+                and self._document is not None
+                and not self._running
+            )
+        edit_ready = (
+            self._mode_group.get_active_name() != "edit"
+            or not self._selection.is_empty
+        )
+        self._send_button.set_sensitive(
+            enabled
+            and edit_ready
+            and self._prompt_buffer.get_char_count() > 0
         )
 
     def _hide_status(self) -> None:

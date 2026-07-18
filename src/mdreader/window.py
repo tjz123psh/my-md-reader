@@ -85,13 +85,13 @@ class MdReaderWindow(Adw.ApplicationWindow):
             self.maximize()
 
         self.files_button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Files and outline"]
+            [Gtk.AccessibleProperty.LABEL], ["文件与大纲"]
         )
         self.search_button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["Find in document"]
+            [Gtk.AccessibleProperty.LABEL], ["在文档中查找"]
         )
-        self.ai_button.update_property([Gtk.AccessibleProperty.LABEL], ["AI assistant"])
-        self.menu_button.update_property([Gtk.AccessibleProperty.LABEL], ["Main menu"])
+        self.ai_button.update_property([Gtk.AccessibleProperty.LABEL], ["AI 助手"])
+        self.menu_button.update_property([Gtk.AccessibleProperty.LABEL], ["主菜单"])
 
         self._library = LibrarySidebar(self._on_document_selected)
         self._library.set_outline_callback(self._on_outline_selected)
@@ -171,7 +171,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
         elif path.is_file():
             self.open_workspace(path.parent, preferred_document=Path(path.name))
         else:
-            self._show_toast(f"Path does not exist: {path}")
+            self._show_toast(f"路径不存在：{path}")
 
     def open_workspace(self, root: Path, preferred_document: Path | None = None) -> None:
         self._scan_generation += 1
@@ -199,7 +199,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
     def _create_search_popover(self) -> None:
         self._search_entry = Gtk.SearchEntry(
             width_chars=28,
-            placeholder_text="Find in document",
+            placeholder_text="在文档中查找",
         )
         self._search_entry.connect("search-changed", self._on_search_changed)
         search_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -284,13 +284,13 @@ class MdReaderWindow(Adw.ApplicationWindow):
     def _on_open_document(
         self, _action: Gio.SimpleAction, _parameter: object
     ) -> None:
-        markdown_filter = Gtk.FileFilter(name="Markdown documents")
+        markdown_filter = Gtk.FileFilter(name="Markdown 文档")
         for suffix in ("md", "markdown", "mdown", "mkd"):
             markdown_filter.add_suffix(suffix)
         filters = Gio.ListStore.new(Gtk.FileFilter)
         filters.append(markdown_filter)
         dialog = Gtk.FileDialog(
-            title="Open Markdown Document",
+            title="打开 Markdown 文档",
             modal=True,
             filters=filters,
             default_filter=markdown_filter,
@@ -309,7 +309,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
             self.open_path(Path(path))
 
     def _on_open_folder(self, _action: Gio.SimpleAction, _parameter: object) -> None:
-        dialog = Gtk.FileDialog(title="Open Markdown Folder", modal=True)
+        dialog = Gtk.FileDialog(title="打开 Markdown 文件夹", modal=True)
         dialog.select_folder(self, None, self._on_folder_selected)
 
     def _on_folder_selected(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
@@ -339,7 +339,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._ai.refresh_theme(theme)
         self._settings.set_string("color-scheme", theme.id)
         action.set_state(GLib.Variant.new_string(theme.id))
-        self._show_toast(f"Theme: {theme.name}")
+        self._show_toast(f"主题：{theme.name}")
 
     def _on_toggle_library(self, _action: Gio.SimpleAction, _parameter: object) -> None:
         self._library_split.set_show_sidebar(not self._library_split.get_show_sidebar())
@@ -511,7 +511,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
             return
         model = parameter.get_string()
         if model not in self._available_models:
-            self._show_toast("That OpenCode model is no longer available")
+            self._show_toast("此 OpenCode 模型已不可用")
             return
         if model == self._selected_model:
             action.set_state(parameter)
@@ -535,7 +535,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
         if generation != self._scan_generation:
             return GLib.SOURCE_REMOVE
         self._library.show_workspace_error(str(error))
-        self._show_toast("Could not open folder")
+        self._show_toast("无法打开文件夹")
         return GLib.SOURCE_REMOVE
 
     def _on_document_selected(self, relative_path: Path) -> None:
@@ -628,7 +628,7 @@ pacstrap -K /mnt base linux linux-firmware
         return GLib.SOURCE_REMOVE
 
     def _on_document_error(self, error: Exception) -> None:
-        self._show_toast(f"Could not render document: {error}")
+        self._show_toast(f"无法渲染文档：{error}")
 
     def _on_outline_selected(self, item: OutlineItem) -> None:
         self._document.scroll_to_heading(item.slug)
@@ -673,13 +673,13 @@ pacstrap -K /mnt base linux linux-firmware
             or self._current_document_path is None
             or self._current_relative_path is None
         ):
-            self._ai.show_error("Open a document before starting a conversation")
+            self._ai.show_error("请先打开文档，再开始对话")
             return
         if self._current_source is None:
-            self._ai.show_error("Wait for the document to finish rendering")
+            self._ai.show_error("请等待文档渲染完成")
             return
         if edit_mode and self._selection.is_empty:
-            self._ai.show_error("Select the lines to change before proposing an edit")
+            self._ai.show_error("请先选择需要修改的文档行")
             return
         try:
             context = self._context_builder.from_source(
@@ -741,10 +741,10 @@ pacstrap -K /mnt base linux linux-firmware
         payload = self._pending_edit_text
         self._clear_pending_edit()
         if path is None or self._patches is None:
-            self._ai.show_error("The source document is no longer available")
+            self._ai.show_error("源文档已不可用")
             return
         if self._current_document_path != path:
-            self._ai.show_error("The document changed before the edit proposal was ready")
+            self._ai.show_error("修改建议生成前，文档内容已发生变化")
             return
         try:
             proposal = self._patches.propose(
@@ -757,7 +757,7 @@ pacstrap -K /mnt base linux linux-firmware
         except (OSError, PatchError) as error:
             self._ai.show_error(str(error))
             return
-        self._ai.finish_assistant("Change ready for review")
+        self._ai.finish_assistant("修改建议已生成，请审核")
         self._show_patch_dialog(proposal)
 
     def _clear_pending_edit(self) -> None:
@@ -786,12 +786,12 @@ pacstrap -K /mnt base linux linux-firmware
         )
         scrolled.set_child(view)
         dialog = Adw.AlertDialog.new(
-            "Apply AI change?",
-            f"Only lines {proposal.start_line}–{proposal.end_line} of {proposal.path.name} will change.",
+            "应用 AI 修改？",
+            f"只会修改 {proposal.path.name} 的第 {proposal.start_line}–{proposal.end_line} 行。",
         )
         dialog.set_extra_child(scrolled)
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("apply", "Apply Change")
+        dialog.add_response("cancel", "取消")
+        dialog.add_response("apply", "应用修改")
         dialog.set_close_response("cancel")
         dialog.set_default_response("cancel")
         dialog.set_response_appearance("apply", Adw.ResponseAppearance.SUGGESTED)
@@ -804,14 +804,14 @@ pacstrap -K /mnt base linux linux-firmware
         if response != "apply":
             return
         if self._patches is None:
-            self._show_toast("The open workspace changed; the proposal was not applied")
+            self._show_toast("打开的工作区已变化，未应用此修改建议")
             return
         try:
             self._patches.apply(proposal)
         except (OSError, PatchError) as error:
             self._show_toast(str(error))
             return
-        toast = Adw.Toast(title="AI change applied", button_label="Undo")
+        toast = Adw.Toast(title="已应用 AI 修改", button_label="撤销")
         toast.connect("button-clicked", self._on_patch_undo)
         self.toast_overlay.add_toast(toast)
         self._undo_action.set_enabled(True)
@@ -830,7 +830,7 @@ pacstrap -K /mnt base linux linux-firmware
         try:
             if self._patches.undo():
                 self._undo_action.set_enabled(False)
-                self._show_toast("AI change undone")
+                self._show_toast("已撤销 AI 修改")
         except (OSError, PatchError) as error:
             self._undo_action.set_enabled(self._patches.can_undo)
             self._show_toast(str(error))
@@ -843,7 +843,7 @@ pacstrap -K /mnt base linux linux-firmware
             relative = self._workspace.relative_path(path)
             self._workspace.validate_document(relative)
         except WorkspaceError:
-            self._show_toast("Linked document is outside the open workspace")
+            self._show_toast("链接的文档位于当前工作区之外")
             return
         self._on_document_selected(relative)
 
@@ -883,7 +883,7 @@ pacstrap -K /mnt base linux linux-firmware
         if update_document:
             self._document.set_zoom(self._zoom)
         if announce:
-            self._show_toast(f"Document zoom: {self._zoom}%")
+            self._show_toast(f"文档缩放：{self._zoom}%")
 
     def _save_zoom_setting(self) -> bool:
         self._zoom_save_source_id = 0

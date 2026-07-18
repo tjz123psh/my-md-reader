@@ -20,8 +20,14 @@ def _fcitx_gtk4_module_available() -> bool:
 
 
 def configure_gtk_input_method() -> None:
-    """Select the installed Fcitx GTK 4 bridge before GTK is initialized."""
+    """Select the appropriate GTK input path before GTK is initialized."""
     if os.environ.get("GTK_IM_MODULE"):
+        return
+    # GTK 4 on a modern Wayland compositor should use its built-in Wayland
+    # input method. In this Niri session fcitx5-gtk's own probe selects
+    # ``wayland``; forcing the legacy direct Fcitx module here breaks preedit
+    # specifically in GtkTextView even though other native apps work.
+    if os.environ.get("WAYLAND_DISPLAY"):
         return
     hints = " ".join(
         (

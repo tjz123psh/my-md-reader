@@ -40,10 +40,10 @@ class LibrarySidebar(Gtk.Box):
 
         self._file_empty = Adw.StatusPage(
             icon_name="folder-symbolic",
-            title="Open a Markdown folder",
-            description="Choose a folder to browse its Markdown files",
+            title="打开 Markdown 文件夹",
+            description="选择文件夹以浏览其中的 Markdown 文档",
         )
-        open_button = Gtk.Button(label="Open Folder", action_name="win.open-folder")
+        open_button = Gtk.Button(label="打开文件夹", action_name="win.open-folder")
         open_button.add_css_class("pill")
         open_button.add_css_class("suggested-action")
         open_button.set_halign(Gtk.Align.CENTER)
@@ -52,8 +52,8 @@ class LibrarySidebar(Gtk.Box):
 
         self._file_loading = Adw.StatusPage(
             icon_name="folder-symbolic",
-            title="Reading folder",
-            description="Finding Markdown documents…",
+            title="正在读取文件夹",
+            description="正在查找 Markdown 文档…",
         )
         self._files_stack.add_named(self._file_loading, "loading")
         self._files_stack.set_visible_child_name("empty")
@@ -73,17 +73,17 @@ class LibrarySidebar(Gtk.Box):
         self._outline_stack.add_named(self._outline_scroll, "outline")
         self._outline_empty = Adw.StatusPage(
             icon_name="view-list-symbolic",
-            title="No outline",
-            description="Headings in the current document appear here",
+            title="暂无大纲",
+            description="当前文档中的标题会显示在这里",
         )
         self._outline_stack.add_named(self._outline_empty, "empty")
         self._outline_stack.set_visible_child_name("empty")
 
         self._view_stack.add_titled_with_icon(
-            self._files_stack, "files", "Files", "folder-symbolic"
+            self._files_stack, "files", "文件", "folder-symbolic"
         )
         self._view_stack.add_titled_with_icon(
-            self._outline_stack, "outline", "Outline", "view-list-symbolic"
+            self._outline_stack, "outline", "大纲", "view-list-symbolic"
         )
         self._view_stack.connect("notify::visible-child-name", self._on_view_changed)
 
@@ -105,7 +105,7 @@ class LibrarySidebar(Gtk.Box):
         self._files_stack.set_visible_child_name("loading")
 
     def show_workspace_error(self, message: str) -> None:
-        self._file_empty.set_title("Could not open folder")
+        self._file_empty.set_title("无法打开文件夹")
         self._file_empty.set_description(message)
         self._files_stack.set_visible_child_name("empty")
 
@@ -113,9 +113,9 @@ class LibrarySidebar(Gtk.Box):
         entries = tuple(entries)
         if not entries:
             self._file_selection.set_model(None)
-            self._file_empty.set_title("No Markdown files")
+            self._file_empty.set_title("没有 Markdown 文档")
             self._file_empty.set_description(
-                "This folder does not contain .md or .markdown documents"
+                "此文件夹中没有受支持的 Markdown 文档"
             )
             self._files_stack.set_visible_child_name("empty")
             return

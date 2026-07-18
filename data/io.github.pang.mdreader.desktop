@@ -1,6 +1,7 @@
 [Desktop Entry]
 Name=MD Reader
 Comment=Read local Markdown with a focused, warm layout
+Comment[zh_CN]=以专注、舒适的排版阅读本地 Markdown
 Exec=md-reader %F
 Icon=io.github.pang.mdreader
 Terminal=false

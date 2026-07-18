@@ -49,7 +49,7 @@ class OpenCodeGateway:
     ) -> None:
         executable = executable or shutil.which("opencode")
         if executable is None:
-            raise OpenCodeError("OpenCode is not installed")
+            raise OpenCodeError("尚未安装 OpenCode")
         self.executable = executable
         self.workspace = workspace
         self.model = self.normalize_model(model)
@@ -81,10 +81,10 @@ class OpenCodeGateway:
 
     def set_model(self, model: str) -> None:
         if not self.is_free_model(model):
-            raise OpenCodeError("The selected OpenCode model is not a supported free model")
+            raise OpenCodeError("所选 OpenCode 模型不是受支持的免费模型")
         with self._lock:
             if self._active:
-                raise OpenCodeError("Wait for the current response before changing models")
+                raise OpenCodeError("请等待当前回答完成后再切换模型")
             self.model = model
             self.session_id = ""
 
@@ -105,10 +105,10 @@ class OpenCodeGateway:
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
-            raise OpenCodeError(f"Could not list OpenCode models: {error}") from error
+            raise OpenCodeError(f"无法获取 OpenCode 模型列表：{error}") from error
         if completed.returncode != 0:
             message = completed.stderr.strip() or (
-                f"OpenCode model listing exited with status {completed.returncode}"
+                f"OpenCode 模型列表命令异常退出，状态码：{completed.returncode}"
             )
             raise OpenCodeError(message)
 
@@ -120,7 +120,7 @@ class OpenCodeGateway:
             )
         )
         if not models:
-            raise OpenCodeError("OpenCode did not report any free models")
+            raise OpenCodeError("OpenCode 没有返回可用的免费模型")
         return models
 
     def send(
@@ -133,9 +133,9 @@ class OpenCodeGateway:
     ) -> None:
         with self._lock:
             if self._closed:
-                raise OpenCodeError("The OpenCode gateway is closed")
+                raise OpenCodeError("OpenCode 连接已关闭")
             if self._active:
-                raise OpenCodeError("A response is already in progress")
+                raise OpenCodeError("已有回答正在生成")
             self._active = True
             self._cancel_requested.clear()
         command = [
@@ -194,7 +194,7 @@ class OpenCodeGateway:
             if self._cancel_requested.is_set():
                 with self._lock:
                     self._active = False
-                GLib.idle_add(on_error, OpenCodeError("Response cancelled"))
+                GLib.idle_add(on_error, OpenCodeError("回答已取消"))
                 return
             process = subprocess.Popen(
                 command,
@@ -244,9 +244,9 @@ class OpenCodeGateway:
                 terminal_value = finish
             elif return_code < 0:
                 terminal_callback = on_error
-                terminal_value = OpenCodeError("Response cancelled")
+                terminal_value = OpenCodeError("回答已取消")
             else:
-                message = stderr or f"OpenCode exited with status {return_code}"
+                message = stderr or f"OpenCode 异常退出，状态码：{return_code}"
                 terminal_callback = on_error
                 terminal_value = OpenCodeError(message)
         finally:

@@ -35,16 +35,16 @@ class PatchService:
         try:
             value = json.loads(payload.strip())
         except json.JSONDecodeError as error:
-            raise PatchError("The model did not return a valid edit proposal") from error
+            raise PatchError("模型没有返回有效的修改建议") from error
         if not isinstance(value, dict) or set(value) != {"startLine", "endLine", "replacement"}:
-            raise PatchError("The edit proposal has an unexpected structure")
+            raise PatchError("修改建议的结构不正确")
         start = value.get("startLine")
         end = value.get("endLine")
         replacement = value.get("replacement")
         if not isinstance(start, int) or not isinstance(end, int) or not isinstance(replacement, str):
-            raise PatchError("The edit proposal contains invalid field types")
+            raise PatchError("修改建议中包含无效字段")
         if start != expected_start or end != expected_end:
-            raise PatchError("The model tried to modify lines outside the selected range")
+            raise PatchError("模型尝试修改选中范围之外的行")
         return start, end, replacement
 
     def propose(
@@ -61,10 +61,10 @@ class PatchService:
         old_content = self._read_text(path)
         base_hash = self._hash(old_content)
         if base_hash != expected_base_hash:
-            raise PatchError("The file changed while OpenCode was preparing the proposal")
+            raise PatchError("OpenCode 生成建议期间，文件已发生变化")
         lines = old_content.splitlines(keepends=True)
         if start < 1 or end < start or end > len(lines):
-            raise PatchError("Selected source lines no longer exist")
+            raise PatchError("选中的源码行已不存在")
         line_ending = "\r\n" if "\r\n" in old_content else "\r" if "\r" in old_content else "\n"
         normalized_replacement = replacement.replace("\r\n", "\n").replace("\r", "\n")
         if line_ending != "\n":
@@ -78,7 +78,7 @@ class PatchService:
         replacement_lines = normalized_replacement.splitlines(keepends=True)
         new_content = "".join(lines[: start - 1] + replacement_lines + lines[end:])
         if new_content == old_content:
-            raise PatchError("The proposal does not change the document")
+            raise PatchError("此建议没有改变文档内容")
         relative_name = path.name
         diff = "".join(
             difflib.unified_diff(
@@ -103,7 +103,7 @@ class PatchService:
         path = self._validate_target(proposal.path)
         current = self._read_text(path)
         if self._hash(current) != proposal.base_hash:
-            raise PatchError("The file changed after the proposal was created")
+            raise PatchError("建议生成后，文件已发生变化")
         self._atomic_write(path, proposal.new_content)
         self._undo = proposal
 
@@ -114,7 +114,7 @@ class PatchService:
         path = self._validate_target(proposal.path)
         current = self._read_text(path)
         if current != proposal.new_content:
-            raise PatchError("The file changed after the AI edit; undo was not applied")
+            raise PatchError("AI 修改后文件又发生了变化，未执行撤销")
         self._atomic_write(path, proposal.old_content)
         self._undo = None
         return True
@@ -127,11 +127,11 @@ class PatchService:
         try:
             target = path.expanduser().resolve(strict=True)
         except OSError as error:
-            raise PatchError(f"The proposed file is no longer available: {path}") from error
+            raise PatchError(f"建议修改的文件已不可用：{path}") from error
         if not target.is_relative_to(self.workspace_root):
-            raise PatchError("The proposed file is outside the open workspace")
+            raise PatchError("建议修改的文件位于当前工作区之外")
         if not target.is_file():
-            raise PatchError("The proposed path is not a file")
+            raise PatchError("建议修改的路径不是文件")
         return target
 
     @staticmethod
