@@ -8,7 +8,8 @@ __pycache__/
 htmlcov/
 *.gresource
 gschemas.compiled
-.opencode/node_modules/
-.opencode/package.json
-.opencode/package-lock.json
-.opencode/bun.lock
+# Local agent configuration and private project handoff material.
+AGENTS.md
+.opencode/
+docs/SESSION_PROMPT.md
+docs/IMPLEMENTATION_PLAN.md
