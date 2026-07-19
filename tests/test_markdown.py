@@ -136,7 +136,7 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertNotIn('"win.zoom-out":', application)
         self.assertNotIn('"win.zoom-reset":', application)
 
-    def test_ai_panel_has_safe_close_modes_and_multiline_prompt(self) -> None:
+    def test_ai_panel_uses_native_entry_without_key_interceptors(self) -> None:
         source = (
             Path(__file__).parents[1] / "src/mdreader/widgets/ai_panel.py"
         ).read_text(encoding="utf-8")
@@ -146,17 +146,16 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn('name="ask"', source)
         self.assertIn('name="edit"', source)
         self.assertIn("Adw.Banner(", source)
-        self.assertIn("Gtk.ShortcutController()", source)
-        self.assertIn("<Control>Return", source)
+        self.assertNotIn("Gtk.ShortcutController()", source)
         self.assertNotIn("Gtk.EventControllerKey()", source)
-        self.assertIn("Gtk.TextView(", source)
+        self.assertNotIn("Gtk.TextView(", source)
+        self.assertNotIn("Gtk.TextBuffer()", source)
+        self.assertIn("Gtk.Entry(", source)
+        self.assertIn('connect("activate", self._on_send_requested)', source)
         self.assertIn('label="AI 助手"', source)
         self.assertIn("询问这篇文档", source)
-        self.assertIn("Gtk.InputPurpose.FREE_FORM", source)
-        self.assertIn('connect("notify::has-focus"', source)
-        self.assertIn("def _sync_prompt_placeholder", source)
+        self.assertNotIn("prompt_overlay", source)
         self.assertIn("def _update_send_button", source)
-        self.assertNotIn("self._prompt_placeholder.set_visible(buffer.get_char_count()", source)
         self.assertIn("self._assistant_history", source)
         self.assertIn("for content, text in self._assistant_history", source)
         self.assertIn("theme=self._theme", source)

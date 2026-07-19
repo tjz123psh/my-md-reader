@@ -168,67 +168,27 @@ class AiPanel(Gtk.Box):
         self._transcript.append(self._status)
 
         composer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self._prompt_buffer = Gtk.TextBuffer()
-        self._prompt_buffer.connect("changed", self._on_prompt_changed)
-        self._prompt_view = Gtk.TextView(
-            buffer=self._prompt_buffer,
+        self._prompt_entry = Gtk.Entry(
             hexpand=True,
-            wrap_mode=Gtk.WrapMode.WORD_CHAR,
             sensitive=False,
+            placeholder_text="询问这篇文档，或补充具体要求…",
         )
-        self._prompt_view.set_input_purpose(Gtk.InputPurpose.FREE_FORM)
-        self._prompt_view.set_input_hints(
-            Gtk.InputHints.SPELLCHECK | Gtk.InputHints.WORD_COMPLETION
-        )
-        self._prompt_view.connect("notify::has-focus", self._on_prompt_focus_changed)
-        self._prompt_view.add_css_class("ai-prompt")
-        self._prompt_view.set_top_margin(10)
-        self._prompt_view.set_bottom_margin(10)
-        self._prompt_view.set_left_margin(10)
-        self._prompt_view.set_right_margin(10)
-        self._prompt_view.update_property(
+        self._prompt_entry.set_size_request(-1, 48)
+        self._prompt_entry.add_css_class("ai-prompt")
+        self._prompt_entry.add_css_class("ai-prompt-frame")
+        self._prompt_entry.update_property(
             [Gtk.AccessibleProperty.LABEL], ["AI 输入框"]
         )
-        shortcut_controller = Gtk.ShortcutController()
-        shortcut_controller.set_scope(Gtk.ShortcutScope.LOCAL)
-        send_action = Gtk.CallbackAction.new(self._on_prompt_send_shortcut)
-        for accelerator in ("<Control>Return", "<Control>KP_Enter"):
-            trigger = Gtk.ShortcutTrigger.parse_string(accelerator)
-            if trigger is not None:
-                shortcut_controller.add_shortcut(Gtk.Shortcut.new(trigger, send_action))
-        self._prompt_view.add_controller(shortcut_controller)
-
-        prompt_scroll = Gtk.ScrolledWindow(
-            hscrollbar_policy=Gtk.PolicyType.NEVER,
-            min_content_height=74,
-            max_content_height=150,
-            propagate_natural_height=True,
-        )
-        prompt_scroll.add_css_class("ai-prompt-frame")
-        prompt_scroll.set_child(self._prompt_view)
-        prompt_overlay = Gtk.Overlay()
-        prompt_overlay.set_child(prompt_scroll)
-        self._prompt_placeholder = Gtk.Label(
-            label="询问这篇文档，或补充具体要求…",
-            xalign=0,
-            yalign=0,
-            wrap=True,
-        )
-        self._prompt_placeholder.add_css_class("dimmed")
-        self._prompt_placeholder.add_css_class("ai-prompt-placeholder")
-        self._prompt_placeholder.set_can_target(False)
-        self._prompt_placeholder.set_margin_start(12)
-        self._prompt_placeholder.set_margin_end(12)
-        self._prompt_placeholder.set_margin_top(11)
-        prompt_overlay.add_overlay(self._prompt_placeholder)
-        composer.append(prompt_overlay)
+        self._prompt_entry.connect("changed", self._on_prompt_changed)
+        self._prompt_entry.connect("activate", self._on_send_requested)
+        composer.append(self._prompt_entry)
 
         composer_actions = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=6,
         )
         composer_hint = Gtk.Label(
-            label="Ctrl+Enter 发送",
+            label="Enter 发送",
             xalign=0,
             hexpand=True,
             ellipsize=Pango.EllipsizeMode.END,
@@ -396,7 +356,7 @@ class AiPanel(Gtk.Box):
         self._scroll_to_bottom()
 
     def focus_composer(self) -> None:
-        self._prompt_view.grab_focus()
+        self._prompt_entry.grab_focus()
 
     def popup_model_menu(self) -> None:
         self._model_button.popup()
@@ -410,25 +370,20 @@ class AiPanel(Gtk.Box):
             self._last_rendered_text = self._assistant_text
 
     def _on_send_requested(self, _widget: Gtk.Widget) -> None:
-        text = self._prompt_buffer.get_text(
-            self._prompt_buffer.get_start_iter(),
-            self._prompt_buffer.get_end_iter(),
-            False,
-        ).strip()
+        text = self._prompt_entry.get_text().strip()
         if not text or self._running or not self._document:
             return
         edit_mode = self._mode_group.get_active_name() == "edit"
-        self._prompt_buffer.set_text("")
+        self._prompt_entry.set_text("")
         self._on_send(text, edit_mode)
 
     def _on_mode_changed(self, group: Adw.ToggleGroup, _param: object) -> None:
         edit_mode = group.get_active_name() == "edit"
-        self._prompt_placeholder.set_label(
+        self._prompt_entry.set_placeholder_text(
             "选择文档文字，然后描述你想要的修改…"
             if edit_mode
             else "询问这篇文档，或补充具体要求…"
         )
-        self._sync_prompt_placeholder()
         self._update_mode_hint()
         self._update_composer()
 
@@ -438,27 +393,8 @@ class AiPanel(Gtk.Box):
             and self._selection.is_empty
         )
 
-    def _on_prompt_changed(self, buffer: Gtk.TextBuffer) -> None:
-        self._sync_prompt_placeholder()
+    def _on_prompt_changed(self, _entry: Gtk.Entry) -> None:
         self._update_send_button()
-
-    def _on_prompt_focus_changed(self, _view: Gtk.TextView, _param: object) -> None:
-        self._sync_prompt_placeholder()
-
-    def _sync_prompt_placeholder(self) -> None:
-        # Hide the overlay as soon as the editor receives focus. IME preedit is
-        # not part of GtkTextBuffer yet, so checking only char_count leaves the
-        # placeholder competing with the composition text and visibly shaking.
-        self._prompt_placeholder.set_visible(
-            self._prompt_buffer.get_char_count() == 0
-            and not self._prompt_view.has_focus()
-        )
-
-    def _on_prompt_send_shortcut(
-        self, _widget: Gtk.Widget, _args: GLib.Variant | None, _data: object
-    ) -> bool:
-        self._on_send_requested(self._prompt_view)
-        return True
 
     def _on_context_clicked(self, _button: Gtk.Button) -> None:
         if self._selection.start_line:
@@ -472,11 +408,8 @@ class AiPanel(Gtk.Box):
 
     def _update_composer(self) -> None:
         enabled = self._available and self._document is not None and not self._running
-        # Re-applying sensitivity while GtkTextView owns an IME composition can
-        # reset its input context. Only touch the property when availability
-        # actually changes; prompt edits update the send button alone.
-        if self._prompt_view.get_sensitive() != enabled:
-            self._prompt_view.set_sensitive(enabled)
+        if self._prompt_entry.get_sensitive() != enabled:
+            self._prompt_entry.set_sensitive(enabled)
         self._update_send_button(enabled)
         self._mode_group.set_sensitive(enabled)
         self._edit_mode.set_enabled(enabled)
@@ -498,7 +431,7 @@ class AiPanel(Gtk.Box):
         self._send_button.set_sensitive(
             enabled
             and edit_ready
-            and self._prompt_buffer.get_char_count() > 0
+            and bool(self._prompt_entry.get_text())
         )
 
     def _hide_status(self) -> None:

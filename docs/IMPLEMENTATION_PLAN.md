@@ -52,7 +52,7 @@ This is the live project state. Update it after each coherent milestone.
 - [x] Implement the editorial context rail and source jump-back.
 - [x] Add model selection without storing credentials.
 - [x] Render assistant Markdown with syntax color and a Thinking state.
-- [x] Preserve Fcitx/Chinese IME preedit in the multiline AI composer.
+- [x] Preserve Fcitx/Chinese IME preedit in the AI composer.
 - [x] Use native Wayland IME preedit without composer state churn.
 - [x] Translate primary navigation, AI controls, dialogs and errors to Chinese.
 
@@ -165,9 +165,8 @@ The AI panel now disables nested window title buttons and uses an explicit
 Hide action, verified to preserve the active application window. Ask and Edit
 are visible exclusive modes. Edit can be selected without a source selection,
 shows an inline requirement and enables send once lines are selected, while
-continuing through the reviewed diff boundary. The composer is a bounded
-multiline prompt field that leaves normal typing and Enter to the IME and uses
-Ctrl+Enter to send.
+continuing through the reviewed diff boundary. The composer now uses a native
+GTK entry and has no key or shortcut controller.
 Clean Niri acceptance at 640, 960, 1280 and 1920px is in
 `/tmp/mdreader-ime-search-final/`; the settled 1280 transition check is
 `settled-1280.png` in the same directory.
@@ -191,9 +190,10 @@ Assistant Markdown now consumes the same theme syntax tokens instead of a
 separate light/dark palette, and theme changes re-render both the current reply
 and earlier assistant messages so inline code cannot retain stale colors.
 
-The AI composer no longer owns a general key controller. Only local
-`Ctrl+Enter`/`Ctrl+KP_Enter` shortcuts are registered, leaving ordinary keys,
-Enter and IME preedit with `GtkTextView`. On the recorded Niri/Fcitx5 session,
+The AI composer no longer owns a key or shortcut controller. It uses the same
+native `GtkEntry` input path as document search, with Enter activating send
+only after the IME has handled candidate confirmation. On the recorded
+Niri/Fcitx5 session,
 the GTK4 probe selects the native `wayland` input path, so `bootstrap.py` no
 longer forces the direct Fcitx module on Wayland; it retains that fallback for
 X11 and preserves explicit user overrides.
@@ -214,10 +214,19 @@ Niri acceptance covers 634, 954, 1273 and 1912px tiles, all five themes, a 960px
 AI overlay, high contrast and 200% text scaling; screenshots are under
 `/tmp/mdreader-four-fixes/`.
 
-The 2026-07-19 Chinese-input pass removes the remaining IME reset path in the
-AI composer. Buffer changes now update only the send button, sensitivity is
-changed only when availability actually changes, and the custom placeholder is
-hidden while the editor has focus so it cannot overlap uncommitted preedit text
-and shake. The primary application UI, status pages, AI controls, theme names,
+The 2026-07-19 Chinese-input pass replaces the problematic multiline
+`GtkTextView` with the same native entry path already proven by document search.
+The composer has no custom text buffer, overlay placeholder or keyboard
+controller, eliminating the widget-specific Fcitx failure and input shaking.
+The primary application UI, status pages, AI controls, theme names,
 file dialogs, diff approval and user-facing service errors now use Simplified
 Chinese; desktop and AppStream metadata include Chinese copy as well.
+
+The native entry was launched in the real application and inspected at Niri's
+634, 954, 1273 and 1912px tile widths. Direct Wayland Unicode input remained
+visible and stable with no composer clipping or layout movement; screenshots
+are in `/tmp/mdreader-ime-entry/entry-ai-{640,960,1280,1920}.png`. Virtual
+keyboard events do not traverse Fcitx5's physical-key preedit path, so final
+Pinyin candidate acceptance was repeated in the normal desktop D-Bus/Wayland
+session with a physical keyboard. Fcitx5 switched normally and committed
+Chinese text in the AI entry without the previous input shaking.

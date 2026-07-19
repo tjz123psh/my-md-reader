@@ -145,9 +145,10 @@ fabricates hidden model reasoning.
 The AI composer exposes explicit Ask and Edit modes. Ask is read-only. Edit can
 be selected before source lines exist, shows an inline selection requirement,
 and enables sending only after lines are selected; it can still only produce
-the existing reviewed diff proposal. A bounded multiline prompt field leaves
-normal input and Enter to the input method and sends only with Ctrl+Enter. The
-nested AI header disables window title buttons and owns a separate Hide action,
+the existing reviewed diff proposal. The prompt uses a native `GtkEntry`, the
+same input path as the working document search field. Enter confirms an active
+IME candidate first and sends only after composition has completed. The nested
+AI header disables window title buttons and owns a separate Hide action,
 so closing the panel cannot close the application window.
 
 OpenCode never runs with `--auto`. The gateway injects an app-owned agent via
@@ -250,15 +251,14 @@ each discrete mouse-wheel event remains exactly one 5-point step. Ordinary
 discrete scrolling keeps its short time-based interpolation.
 
 Document search is a compact popover anchored to the left side of the main
-header. It does not install a window-level key-capture widget, so typing and
-IME preedit inside the AI prompt remain owned by the focused `GtkTextView`. The
-composer registers only local `Ctrl+Enter` shortcuts and does not intercept
-normal key events. On Wayland, `bootstrap.py` leaves `GTK_IM_MODULE` unset so
+header. It does not install a window-level key-capture widget. The AI composer
+also has no key or shortcut controller and uses the same native `GtkEntry`
+input path as the working search field. On Wayland, `bootstrap.py` leaves
+`GTK_IM_MODULE` unset so
 GTK 4 uses the compositor's native text-input protocol, matching the result of
 the Fcitx5 GTK4 probe under Niri. The direct Fcitx GTK4 module remains an X11
 fallback, and an explicit user override is always preserved. Prompt edits only
-update the send button; they never reapply `GtkTextView` sensitivity while an
-IME preedit is active.
+update the send button and do not rebuild or restyle the focused editor.
 
 ## 6. Failure behavior
 
