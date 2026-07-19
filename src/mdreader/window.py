@@ -28,7 +28,7 @@ from mdreader.services import (
 )
 from mdreader.services.settings import SettingsStore
 from mdreader.services.patches import PatchProposal
-from mdreader.widgets import AiPanel, DocumentView, LibrarySidebar
+from mdreader.widgets import AiPanel, DocumentView, LibrarySidebar, SidebarResizeHandle
 
 
 @Gtk.Template(resource_path="/io/github/pang/mdreader/ui/window.ui")
@@ -77,6 +77,16 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._test_ctrl_wheel = False
         self._zoom = settings.get_int("document-zoom")
         self._zoom_save_source_id = 0
+        self._sidebar_resize_specs: dict[str, dict[str, object]] = {}
+        self._sidebar_resize_state: dict[str, int] = {}
+        self._sidebar_resize_handles: dict[str, SidebarResizeHandle] = {}
+        self._sidebar_resize_apply_sources: dict[str, int] = {}
+        self._library_sidebar_width = settings.get_sidebar_width(
+            "library-sidebar-width", 260
+        )
+        self._ai_sidebar_width = settings.get_sidebar_width(
+            "ai-sidebar-width", 360
+        )
 
         self.set_default_size(
             settings.get_int("window-width"), settings.get_int("window-height")
@@ -95,6 +105,9 @@ class MdReaderWindow(Adw.ApplicationWindow):
 
         self._library = LibrarySidebar(self._on_document_selected)
         self._library.set_outline_callback(self._on_outline_selected)
+        self._library_sidebar = self._make_resizable_sidebar(
+            self._library, "start", "library"
+        )
         self._document = DocumentView(theme=self._theme)
         self._document.connect("selection-changed", self._on_selection_changed)
         self._document.connect("active-heading-changed", self._on_active_heading_changed)
@@ -108,10 +121,11 @@ class MdReaderWindow(Adw.ApplicationWindow):
             current_model=self._selected_model,
             theme=self._theme,
         )
+        self._ai_sidebar = self._make_resizable_sidebar(self._ai, "end", "ai")
 
         self._ai_split = Adw.OverlaySplitView(
             content=self._document,
-            sidebar=self._ai,
+            sidebar=self._ai_sidebar,
             sidebar_position=Gtk.PackType.END,
             collapsed=False,
             pin_sidebar=True,
@@ -126,7 +140,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._ai_split.connect("notify::show-sidebar", self._sync_ai_button_state)
         self._library_split = Adw.OverlaySplitView(
             content=self._ai_split,
-            sidebar=self._library,
+            sidebar=self._library_sidebar,
             collapsed=False,
             pin_sidebar=True,
             show_sidebar=True,
@@ -137,6 +151,8 @@ class MdReaderWindow(Adw.ApplicationWindow):
             enable_hide_gesture=True,
         )
         self.content_slot.set_child(self._library_split)
+        self._register_sidebar_resizers()
+        self.connect("realize", self._on_window_realized)
 
         self._create_search_popover()
         self._setup_actions()
@@ -152,6 +168,9 @@ class MdReaderWindow(Adw.ApplicationWindow):
     def do_close_request(self) -> bool:
         self._model_load_generation += 1
         self._flush_zoom_setting()
+        for source_id in self._sidebar_resize_apply_sources.values():
+            GLib.source_remove(source_id)
+        self._sidebar_resize_apply_sources.clear()
         if self._opencode is not None:
             self._opencode.close()
         if self._watcher is not None:
@@ -250,14 +269,266 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._model_action.set_enabled(False)
         self.add_action(self._model_action)
 
+    def _make_resizable_sidebar(
+        self, child: Gtk.Widget, edge: str, name: str
+    ) -> Gtk.Overlay:
+        overlay = Gtk.Overlay()
+        overlay.set_child(child)
+        handle = SidebarResizeHandle(
+            lambda: self._begin_sidebar_resize(name),
+            lambda delta: self._update_sidebar_resize(name, delta),
+            lambda: self._finish_sidebar_resize(name),
+            tooltip=(
+                "拖动调整目录宽度"
+                if name == "library"
+                else "拖动调整 AI 助手宽度"
+            ),
+        )
+        # The handle belongs on the edge facing the document: the library
+        # sidebar is at the start but resizes from its end, while the AI
+        # sidebar is at the end but resizes from its start.
+        handle.set_halign(Gtk.Align.END if edge == "start" else Gtk.Align.START)
+        handle.set_valign(Gtk.Align.FILL)
+        overlay.add_overlay(handle)
+        self._sidebar_resize_handles[name] = handle
+        return overlay
+
+    def _register_sidebar_resizers(self) -> None:
+        self._sidebar_resize_specs = {
+            "library": {
+                "split": self._library_split,
+                "sidebar": self._library_sidebar,
+                "edge": "start",
+                "setting": "library-sidebar-width",
+                "preferred": self._library_sidebar_width,
+                "minimum": 230,
+                "maximum": 520,
+                "minimum_content": 640,
+            },
+            "ai": {
+                "split": self._ai_split,
+                "sidebar": self._ai_sidebar,
+                "edge": "end",
+                "setting": "ai-sidebar-width",
+                "preferred": self._ai_sidebar_width,
+                "minimum": 320,
+                "maximum": 680,
+                "minimum_content": 640,
+            },
+        }
+        for name, spec in self._sidebar_resize_specs.items():
+            split = spec["split"]
+            assert isinstance(split, Adw.OverlaySplitView)
+            split.set_sidebar_width_unit(Adw.LengthUnit.PX)
+            self._apply_sidebar_width(name)
+            split.connect("notify::width", self._on_sidebar_split_width_changed, name)
+            split.connect("notify::collapsed", self._on_sidebar_split_state_changed, name)
+            split.connect("notify::show-sidebar", self._on_sidebar_split_state_changed, name)
+            split.connect("notify::pin-sidebar", self._on_sidebar_split_state_changed, name)
+            self._update_sidebar_handle_visibility(name)
+
+    def _apply_sidebar_width(self, name: str) -> None:
+        if name not in self._sidebar_resize_specs:
+            return
+        specs = self._sidebar_resize_specs
+        library_split = specs["library"]["split"]
+        ai_split = specs["ai"]["split"]
+        assert isinstance(library_split, Adw.OverlaySplitView)
+        assert isinstance(ai_split, Adw.OverlaySplitView)
+
+        if library_split.get_collapsed() or ai_split.get_collapsed():
+            # In overlay mode the breakpoint owns the drawer width. The mouse
+            # handle is hidden, so do not replace the adaptive fraction with a
+            # fixed width while moving between Niri presets.
+            return
+
+        available_width = self._available_window_width()
+        if available_width <= 0:
+            # Do not install a large persisted width before the first
+            # allocation. Breakpoints must be able to restore their safe
+            # defaults without a one-frame nested-sidebar overflow.
+            return
+
+        targets = self._sidebar_targets(available_width)
+        for pane_name, target in targets.items():
+            split = specs[pane_name]["split"]
+            assert isinstance(split, Adw.OverlaySplitView)
+            split.set_min_sidebar_width(float(target))
+            split.set_max_sidebar_width(float(target))
+
+    def _sidebar_targets(self, available_width: int) -> dict[str, int]:
+        """Return pane widths that leave the document its minimum reading area.
+
+        The sidebars are nested OverlaySplitViews, so each split can otherwise
+        see a stale or over-allocated child width while a Niri tile changes.
+        Calculate both widths from the window as one budget instead of letting
+        the second pane consume the document area after the first pane clamps.
+        """
+        library = self._sidebar_resize_specs["library"]
+        ai = self._sidebar_resize_specs["ai"]
+        library_min = int(library["minimum"])
+        ai_min = int(ai["minimum"])
+        library_max = int(library["maximum"])
+        ai_max = int(ai["maximum"])
+        minimum_reader = max(
+            int(library["minimum_content"]), int(ai["minimum_content"])
+        )
+
+        if available_width <= 0:
+            return {
+                "library": max(library_min, min(library_max, int(library["preferred"]))),
+                "ai": max(ai_min, min(ai_max, int(ai["preferred"]))),
+            }
+
+        # Reserve a readable document area before choosing either pane. This
+        # makes a large persisted pair safe when a user returns from a 1920px
+        # tile to a 1280px tile, while preserving both preferences whenever
+        # they fit together.
+        sidebar_budget = max(
+            library_min + ai_min, available_width - minimum_reader
+        )
+        effective_library_max = min(
+            library_max, max(library_min, sidebar_budget - ai_min)
+        )
+        library_target = max(
+            library_min,
+            min(effective_library_max, int(library["preferred"])),
+        )
+
+        ai_budget = sidebar_budget - library_target
+        effective_ai_max = min(ai_max, max(ai_min, ai_budget))
+        ai_target = max(ai_min, min(effective_ai_max, int(ai["preferred"])))
+        return {"library": library_target, "ai": ai_target}
+
+    def _available_window_width(self) -> int:
+        surface = self.get_surface()
+        if surface is not None:
+            width = surface.get_width()
+            if width > 0:
+                return width
+        width = self.get_width()
+        if width > 0:
+            return width
+        return self.content_slot.get_allocated_width()
+
+    def _on_sidebar_split_width_changed(
+        self, split: Adw.OverlaySplitView, _param: object, name: str
+    ) -> None:
+        if split.get_collapsed() or name in self._sidebar_resize_state:
+            return
+        self._queue_sidebar_width_apply(name)
+
+    def _on_window_realized(self, _window: Gtk.Window) -> None:
+        surface = self.get_surface()
+        if surface is None:
+            return
+        surface.connect("notify::width", self._on_window_surface_width_changed)
+        for name in self._sidebar_resize_specs:
+            self._queue_sidebar_width_apply(name)
+
+    def _on_window_surface_width_changed(
+        self, _surface: object, _param: object
+    ) -> None:
+        # The surface has already received Niri's new tile width, while child
+        # allocations still reflect the previous frame. Clamp immediately so
+        # a narrow tile cannot briefly lay out both persisted panes at their
+        # wide widths; the delayed pass below then restores the preference
+        # once nested allocations settle.
+        if self._sidebar_resize_specs:
+            self._apply_sidebar_width("library")
+        for name in self._sidebar_resize_specs:
+            self._queue_sidebar_width_apply(name)
+
+    def _queue_sidebar_width_apply(self, name: str) -> None:
+        if name in self._sidebar_resize_apply_sources:
+            return
+        # Width notifications arrive while GTK is still negotiating the
+        # nested split allocations. Apply on the next settled frame rather
+        # than reading the previous tile width and leaving a temporarily
+        # clamped preference stuck after the window expands again.
+        self._sidebar_resize_apply_sources[name] = GLib.timeout_add(
+            32,
+            self._apply_sidebar_width_idle, name
+        )
+
+    def _apply_sidebar_width_idle(self, name: str) -> bool:
+        self._sidebar_resize_apply_sources.pop(name, None)
+        self._apply_sidebar_width(name)
+        return GLib.SOURCE_REMOVE
+
+    def _on_sidebar_split_state_changed(
+        self, _split: Adw.OverlaySplitView, _param: object, name: str
+    ) -> None:
+        self._update_sidebar_handle_visibility(name)
+        if name not in self._sidebar_resize_state:
+            self._queue_sidebar_width_apply(name)
+
+    def _update_sidebar_handle_visibility(self, name: str) -> None:
+        spec = self._sidebar_resize_specs.get(name)
+        if not spec:
+            return
+        split = spec["split"]
+        assert isinstance(split, Adw.OverlaySplitView)
+        handle = self._sidebar_resize_handles.get(name)
+        if handle is not None:
+            handle.set_visible(split.get_show_sidebar() and not split.get_collapsed())
+
+    def _begin_sidebar_resize(self, name: str) -> None:
+        spec = self._sidebar_resize_specs.get(name)
+        if not spec:
+            return
+        sidebar = spec["sidebar"]
+        assert isinstance(sidebar, Gtk.Widget)
+        self._sidebar_resize_state[name] = max(
+            1, sidebar.get_allocated_width()
+        )
+
+    def _update_sidebar_resize(self, name: str, offset_x: float) -> None:
+        spec = self._sidebar_resize_specs.get(name)
+        start_width = self._sidebar_resize_state.get(name)
+        if not spec or start_width is None:
+            return
+        split = spec["split"]
+        assert isinstance(split, Adw.OverlaySplitView)
+        direction = 1 if spec["edge"] == "start" else -1
+        target = int(round(start_width + direction * offset_x))
+        minimum = int(spec["minimum"])
+        maximum = int(spec["maximum"])
+        split_width = split.get_allocated_width()
+        if split_width > 0:
+            available_max = (
+                int(split_width * 0.92)
+                if split.get_collapsed()
+                else split_width - int(spec["minimum_content"])
+            )
+            maximum = min(maximum, max(minimum, available_max))
+        target = max(minimum, min(maximum, target))
+        spec["preferred"] = target
+        split.set_sidebar_width_unit(Adw.LengthUnit.PX)
+        split.set_min_sidebar_width(float(target))
+        split.set_max_sidebar_width(float(target))
+
+    def _finish_sidebar_resize(self, name: str) -> None:
+        spec = self._sidebar_resize_specs.get(name)
+        if spec:
+            preferred = int(spec["preferred"])
+            self._settings.set_sidebar_width(str(spec["setting"]), preferred)
+        self._sidebar_resize_state.pop(name, None)
+
     def _setup_breakpoints(self) -> None:
         standard = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 1120sp"))
         standard.add_setter(self._library_split, "collapsed", True)
         standard.add_setter(self._library_split, "pin-sidebar", False)
         standard.add_setter(self._library_split, "show-sidebar", False)
+        standard.add_setter(self._library_split, "min-sidebar-width", 230.0)
+        standard.add_setter(self._library_split, "max-sidebar-width", 290.0)
+        standard.add_setter(self._library_split, "sidebar-width-fraction", 0.20)
         standard.add_setter(self._ai_split, "collapsed", True)
         standard.add_setter(self._ai_split, "pin-sidebar", False)
         standard.add_setter(self._ai_split, "show-sidebar", False)
+        standard.add_setter(self._ai_split, "min-sidebar-width", 320.0)
+        standard.add_setter(self._ai_split, "max-sidebar-width", 400.0)
+        standard.add_setter(self._ai_split, "sidebar-width-fraction", 0.28)
         standard.add_setter(self.files_button, "visible", True)
         self.add_breakpoint(standard)
 
@@ -267,14 +538,16 @@ class MdReaderWindow(Adw.ApplicationWindow):
         compact.add_setter(self._library_split, "collapsed", True)
         compact.add_setter(self._library_split, "pin-sidebar", False)
         compact.add_setter(self._library_split, "show-sidebar", False)
+        compact.add_setter(self._library_split, "min-sidebar-width", 230.0)
+        compact.add_setter(self._library_split, "max-sidebar-width", 520.0)
+        compact.add_setter(self._library_split, "sidebar-width-fraction", 0.90)
         compact.add_setter(self._ai_split, "collapsed", True)
         compact.add_setter(self._ai_split, "pin-sidebar", False)
         compact.add_setter(self._ai_split, "show-sidebar", False)
-        compact.add_setter(self.files_button, "visible", True)
-        compact.add_setter(self._library_split, "max-sidebar-width", 520.0)
-        compact.add_setter(self._library_split, "sidebar-width-fraction", 0.90)
+        compact.add_setter(self._ai_split, "min-sidebar-width", 320.0)
         compact.add_setter(self._ai_split, "max-sidebar-width", 600.0)
         compact.add_setter(self._ai_split, "sidebar-width-fraction", 0.94)
+        compact.add_setter(self.files_button, "visible", True)
         self.add_breakpoint(compact)
 
         # Wide mode starts with both panes pinned; breakpoints reveal their buttons.

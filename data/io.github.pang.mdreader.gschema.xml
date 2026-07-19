@@ -41,6 +41,16 @@
       <default>'warm-paper'</default>
       <summary>应用与阅读器的统一主题</summary>
     </key>
+    <key name="library-sidebar-width" type="i">
+      <range min="180" max="720" />
+      <default>260</default>
+      <summary>目录侧栏宽度</summary>
+    </key>
+    <key name="ai-sidebar-width" type="i">
+      <range min="180" max="720" />
+      <default>360</default>
+      <summary>AI 助手侧栏宽度</summary>
+    </key>
     <key name="opencode-model" type="s">
       <default>''</default>
       <summary>上次选择的 OpenCode 模型标识符</summary>

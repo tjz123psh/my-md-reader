@@ -127,27 +127,28 @@ class AiPanel(Gtk.Box):
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
             reveal_child=False,
         )
-        context_button = Gtk.Button(has_frame=False)
-        context_button.set_tooltip_text("返回选中的文字")
-        context_button.connect("clicked", self._on_context_clicked)
-        context_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        context_box.add_css_class("context-rail")
-        self._context_meta = Gtk.Label(xalign=0)
+        self._context_button = Gtk.Button(has_frame=False)
+        self._context_button.add_css_class("context-status")
+        self._context_button.set_tooltip_text("返回文档中的选中位置")
+        self._context_button.connect("clicked", self._on_context_clicked)
+        context_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        context_icon = Gtk.Image(icon_name="selection-mode-symbolic")
+        context_icon.add_css_class("context-status-icon")
+        self._context_meta = Gtk.Label(
+            xalign=0,
+            hexpand=True,
+            ellipsize=Pango.EllipsizeMode.END,
+            single_line_mode=True,
+        )
         self._context_meta.add_css_class("caption")
         self._context_meta.add_css_class("dimmed")
-        self._context_quote = Gtk.Label(
-            xalign=0,
-            wrap=True,
-            wrap_mode=Pango.WrapMode.WORD_CHAR,
-            lines=4,
-            ellipsize=Pango.EllipsizeMode.END,
-        )
-        self._context_quote.add_css_class("context-quote")
+        jump_icon = Gtk.Image(icon_name="go-jump-symbolic")
+        jump_icon.add_css_class("dimmed")
+        context_box.append(context_icon)
         context_box.append(self._context_meta)
-        context_box.append(self._context_quote)
-        context_button.set_child(context_box)
-        self._context_revealer.set_child(context_button)
-        content.append(self._context_revealer)
+        context_box.append(jump_icon)
+        self._context_button.set_child(context_box)
+        self._context_revealer.set_child(self._context_button)
 
         self._transcript = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         self._transcript.set_margin_end(4)
@@ -168,6 +169,7 @@ class AiPanel(Gtk.Box):
         self._transcript.append(self._status)
 
         composer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        composer.append(self._context_revealer)
         self._prompt_entry = Gtk.Entry(
             hexpand=True,
             sensitive=False,
@@ -228,6 +230,7 @@ class AiPanel(Gtk.Box):
 
     def set_document(self, relative_path: Path | None) -> None:
         self._document = relative_path
+        self._update_context_summary()
         self._update_composer()
 
     def set_model_options(self, models: tuple[str, ...], current_model: str) -> None:
@@ -263,22 +266,37 @@ class AiPanel(Gtk.Box):
 
     def set_selection(self, selection: DocumentSelection) -> None:
         self._selection = selection
-        if selection.is_empty:
-            self._context_revealer.set_reveal_child(False)
-            self._update_mode_hint()
-            self._update_composer()
-            return
-
-        location = str(self._document) if self._document else "当前文档"
-        if selection.start_line > 0:
-            location += f" · 第 {selection.start_line}–{selection.end_line} 行"
-        if selection.heading_title:
-            location += f" · {selection.heading_title}"
-        self._context_meta.set_label(location)
-        self._context_quote.set_label(selection.text)
-        self._context_revealer.set_reveal_child(True)
+        self._update_context_summary()
         self._update_mode_hint()
         self._update_composer()
+
+    def _update_context_summary(self) -> None:
+        selection = self._selection
+        if selection.is_empty:
+            self._context_revealer.set_reveal_child(False)
+            return
+
+        mode = "修改范围" if self._mode_group.get_active_name() == "edit" else "问答上下文"
+        details = [mode]
+        if selection.start_line > 0 and selection.end_line >= selection.start_line:
+            line_count = selection.end_line - selection.start_line + 1
+            details.append(f"已选 {line_count} 行")
+        else:
+            details.append(f"已选 {len(selection.text)} 个字符")
+        if self._document:
+            details.append(str(self._document))
+        if selection.start_line > 0:
+            details.append(f"第 {selection.start_line}–{selection.end_line} 行")
+        if selection.heading_title:
+            details.append(selection.heading_title)
+
+        summary = " · ".join(details)
+        self._context_meta.set_label(summary)
+        self._context_button.set_tooltip_text(f"{summary}\n点击返回文档中的选中位置")
+        self._context_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], [summary]
+        )
+        self._context_revealer.set_reveal_child(True)
 
     def append_user(self, text: str) -> None:
         self._hide_status()
@@ -384,6 +402,7 @@ class AiPanel(Gtk.Box):
             if edit_mode
             else "询问这篇文档，或补充具体要求…"
         )
+        self._update_context_summary()
         self._update_mode_hint()
         self._update_composer()
 

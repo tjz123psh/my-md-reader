@@ -7,13 +7,30 @@
   font-weight: 700;
 }
 
-.context-rail {
-  border-left: 3px solid @accent_color;
-  padding-left: 12px;
+.sidebar-resize-handle {
+  background: transparent;
+  min-width: 10px;
+  transition: background-color 120ms ease-out;
 }
 
-.context-quote {
-  color: @view_fg_color;
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.dragging {
+  background: alpha(@accent_color, 0.22);
+}
+
+.context-status {
+  background: alpha(@accent_color, 0.08);
+  border: 1px solid alpha(@accent_color, 0.16);
+  border-radius: 8px;
+  padding: 4px 7px;
+}
+
+.context-status:hover {
+  background: alpha(@accent_color, 0.13);
+}
+
+.context-status-icon {
+  color: @accent_color;
 }
 
 .user-message {

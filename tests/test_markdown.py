@@ -136,6 +136,37 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertNotIn('"win.zoom-out":', application)
         self.assertNotIn('"win.zoom-reset":', application)
 
+    def test_ai_selection_context_is_compact_and_does_not_embed_the_quote(self) -> None:
+        source = (
+            Path(__file__).parents[1] / "src/mdreader/widgets/ai_panel.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('composer.append(self._context_revealer)', source)
+        self.assertIn('details.append(f"已选 {line_count} 行")', source)
+        self.assertIn("_update_context_summary", source)
+        self.assertNotIn("self._context_quote", source)
+        self.assertNotIn("lines=4", source)
+
+    def test_sidebars_expose_persistent_drag_resize_handles(self) -> None:
+        root = Path(__file__).parents[1]
+        window = (root / "src/mdreader/window.py").read_text(encoding="utf-8")
+        settings = (root / "data/io.github.pang.mdreader.gschema.xml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("SidebarResizeHandle", window)
+        self.assertIn("_register_sidebar_resizers", window)
+        self.assertIn(
+            'Gtk.Align.END if edge == "start" else Gtk.Align.START', window
+        )
+        self.assertIn(
+            'split.get_show_sidebar() and not split.get_collapsed()', window
+        )
+        self.assertIn('"min-sidebar-width", 320.0', window)
+        self.assertIn('"max-sidebar-width", 600.0', window)
+        self.assertIn('"library-sidebar-width"', window)
+        self.assertIn('"ai-sidebar-width"', window)
+        self.assertIn('name="library-sidebar-width"', settings)
+        self.assertIn('name="ai-sidebar-width"', settings)
+
     def test_ai_panel_uses_native_entry_without_key_interceptors(self) -> None:
         source = (
             Path(__file__).parents[1] / "src/mdreader/widgets/ai_panel.py"

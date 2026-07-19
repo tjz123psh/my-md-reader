@@ -78,6 +78,12 @@ This is the live project state. Update it after each coherent milestone.
 
 ## Current handoff
 
+The 2026-07-19 context-layout pass replaces the large selected-text quote shown in the AI panel with a compact, single-line context status above the composer. It reports mode, selected line/character count, document, source range and heading, and remains clickable to jump back to the selection without duplicating document text or consuming transcript space.
+
+Both pinned side panes now have a 10px native GTK drag handle on their document-facing edge. Dragging the directory or AI edge updates the pane width in pixels, clamps it to preserve a usable reading area, and persists the chosen width in `library-sidebar-width` / `ai-sidebar-width`. Existing Adw breakpoints still switch both panes to overlay drawers below 1120sp, where the handles hide automatically.
+
+The change passes the full four-test Meson suite, Meson compile, Python bytecode compilation and `git diff --check`. A real MD Reader window was launched under Niri and recaptured at 640/960/1280/1920px in `/tmp/mdreader-context-layout-final/`; 640px and 960px keep both panes as drawers with hidden handles, while 1280px and 1920px keep the three-column reader layout. The resize budget now computes both nested pane widths against the current Wayland surface width, so an oversized persisted pair is clamped before a narrow-to-wide transition can overflow the document. A live probe covered 640→960→1280→1920 transitions with persisted 520px/680px preferences and confirmed no `min-sidebar-width > max-sidebar-width`; a fresh 1280 probe also settled at 360px/320px while preserving a 600px document area. The test settings now use an in-memory facade and no longer modify the developer's dconf values.
+
 Updated 2026-07-19. The repository is initialized on `main` with the GitHub
 `origin` configured. The native reader, workspace navigation, selection-aware
 OpenCode conversation and selected-line diff workflow are functional. There are

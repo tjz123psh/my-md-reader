@@ -18,6 +18,8 @@ class SettingsStore:
         "document-zoom": 100,
         "color-scheme": "warm-paper",
         "opencode-model": "",
+        "library-sidebar-width": 260,
+        "ai-sidebar-width": 360,
     }
 
     def __init__(self) -> None:
@@ -58,3 +60,13 @@ class SettingsStore:
             self._settings.set_string(key, value)
         else:
             self._memory[key] = value
+
+    def get_sidebar_width(self, key: str, default: int) -> int:
+        try:
+            value = self.get_int(key)
+        except (KeyError, TypeError, ValueError):
+            return default
+        return max(180, min(720, value))
+
+    def set_sidebar_width(self, key: str, value: int) -> None:
+        self.set_int(key, max(180, min(720, int(value))))
