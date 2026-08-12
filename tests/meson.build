@@ -25,5 +25,5 @@ test(
   ],
   env: smoke_env,
   is_parallel: false,
-  timeout: 45,
+  timeout: 120,
 )

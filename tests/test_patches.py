@@ -52,6 +52,28 @@ class PatchServiceTests(unittest.TestCase):
                 payload=self.payload(1, 3),
             )
 
+    def test_rejects_boolean_line_boundaries(self) -> None:
+        for field in ("startLine", "endLine"):
+            with self.subTest(field=field):
+                payload = {"startLine": 1, "endLine": 1, "replacement": "TWO"}
+                payload[field] = True
+                with self.assertRaisesRegex(PatchError, "无效字段"):
+                    PatchService.parse_replacement(
+                        json.dumps(payload),
+                        expected_start=1,
+                        expected_end=1,
+                    )
+
+    def test_accepts_integer_line_boundaries(self) -> None:
+        self.assertEqual(
+            PatchService.parse_replacement(
+                self.payload(1, 3),
+                expected_start=1,
+                expected_end=3,
+            ),
+            (1, 3, "TWO"),
+        )
+
     def test_apply_and_undo_are_atomic_from_callers_perspective(self) -> None:
         proposal = self.propose()
         self.service.apply(proposal)

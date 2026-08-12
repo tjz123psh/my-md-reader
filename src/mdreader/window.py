@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 import gi
 
@@ -15,16 +14,26 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from mdreader.models import DocumentSelection, OutlineItem, RenderedDocument
 from mdreader.services import (
     ContextBuilder,
+    DocumentSnapshot,
+    LocalDocumentLinkError,
     OpenCodeError,
     OpenCodeGateway,
     PatchError,
     PatchService,
+    ScanCoordinator,
     WorkspaceError,
     WorkspaceService,
+    WorkspaceSnapshot,
     WorkspaceWatcher,
     apply_color_scheme,
     get_theme,
     normalize_theme_id,
+    parse_local_document_uri,
+)
+from mdreader.services.restore import (
+    RestoreRequest,
+    make_restore,
+    resolve_presented_action,
 )
 from mdreader.services.settings import SettingsStore
 from mdreader.services.patches import PatchProposal
@@ -55,9 +64,16 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self.add_css_class(self._theme.css_class)
         self._workspace: WorkspaceService | None = None
         self._watcher: WorkspaceWatcher | None = None
+        self._watcher_unavailable_reported = False
+        self._closed = False
         self._current_relative_path: Path | None = None
         self._current_document_path: Path | None = None
+        self._current_document_identity: tuple[int, int] | None = None
+        self._current_document_fingerprint: tuple[int, int, int, int] | None = None
         self._current_source: str | None = None
+        self._pending_fragment: tuple[Path, str] | None = None
+        self._pending_restore: RestoreRequest | None = None
+        self._active_heading_slug = ""
         self._selection = DocumentSelection()
         self._context_builder = ContextBuilder()
         self._patches: PatchService | None = None
@@ -73,6 +89,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._available_models: tuple[str, ...] = ()
         self._model_load_generation = 0
         self._scan_generation = 0
+        self._ai_request_generation = 0
         self._test_source_line = 0
         self._test_ctrl_wheel = False
         self._zoom = settings.get_int("document-zoom")
@@ -161,18 +178,25 @@ class MdReaderWindow(Adw.ApplicationWindow):
         if initial_path:
             self.open_path(initial_path)
         else:
-            last_workspace = settings.get_string("last-workspace")
-            if last_workspace and Path(last_workspace).is_dir():
-                self.open_workspace(Path(last_workspace))
+            self._restore_last_session()
 
     def do_close_request(self) -> bool:
+        if self._closed:
+            return False
+        self._closed = True
+        self._scan_generation += 1
         self._model_load_generation += 1
+        self._ai_request_generation += 1
+        self._document.invalidate()
+        self._document.close()
+        self._ai.close()
         self._flush_zoom_setting()
         for source_id in self._sidebar_resize_apply_sources.values():
             GLib.source_remove(source_id)
         self._sidebar_resize_apply_sources.clear()
         if self._opencode is not None:
             self._opencode.close()
+            self._opencode = None
         if self._watcher is not None:
             self._watcher.close()
             self._watcher = None
@@ -183,34 +207,142 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._settings.set_boolean("window-maximized", self.is_maximized())
         return False
 
+    def _restore_last_session(self) -> None:
+        last_workspace = self._settings.get_string("last-workspace")
+        if not last_workspace:
+            return
+        root = Path(last_workspace)
+        if not root.is_dir():
+            return
+
+        stored_document = self._settings.get_string("last-document")
+        if stored_document:
+            try:
+                workspace = WorkspaceService(root)
+                document = workspace.validate_document(Path(stored_document))
+            except WorkspaceError:
+                pass
+            else:
+                self.open_document(document, workspace_root=root)
+                return
+        self.open_workspace(root)
+
     def open_path(self, path: Path) -> None:
+        if self._closed:
+            return
         path = path.expanduser().resolve(strict=False)
         if path.is_dir():
             self.open_workspace(path)
         elif path.is_file():
-            self.open_workspace(path.parent, preferred_document=Path(path.name))
+            self.open_document(path)
         else:
             self._show_toast(f"路径不存在：{path}")
 
-    def open_workspace(self, root: Path, preferred_document: Path | None = None) -> None:
+    def open_document(
+        self, path: Path, *, workspace_root: Path | None = None
+    ) -> None:
+        if self._closed:
+            return
+        path = path.expanduser().resolve(strict=False)
+        root = workspace_root if workspace_root is not None else path.parent
+        try:
+            workspace = WorkspaceService(root)
+            relative = workspace.relative_path(path)
+            workspace.validate_document(relative)
+        except WorkspaceError as error:
+            self._show_toast(f"无法打开文档：{error}")
+            return
+
         self._scan_generation += 1
         generation = self._scan_generation
         self._library.show_loading()
-        self.title_label.set_label(root.name or str(root))
+        self._activate_workspace(workspace, install_watcher=False)
+        if self._watcher is None:
+            # A root-only monitor starts immediately so changes that arrive
+            # while the recursive parent scan runs are not lost; the finished
+            # scan then extends monitoring to every discovered directory.
+            self._install_workspace_watcher(workspace, (workspace.root,))
+        previous_watcher = self._watcher
+        previous_serial = (
+            previous_watcher.change_serial if previous_watcher is not None else 0
+        )
+        # Reading the requested file must not wait for a recursive scan of its
+        # parent directory. The tree is populated independently below.
+        self._on_document_selected(relative)
 
         def worker() -> None:
             try:
-                workspace = WorkspaceService(root)
-                entries = workspace.scan()
+                snapshot = workspace.scan_snapshot()
             except Exception as error:
-                GLib.idle_add(self._finish_workspace_error, generation, error)
+                GLib.idle_add(
+                    self._finish_direct_document_scan_error,
+                    generation,
+                    workspace,
+                    error,
+                    previous_watcher,
+                    previous_serial,
+                )
+                return
+            GLib.idle_add(
+                self._finish_direct_document_scan,
+                generation,
+                workspace,
+                snapshot,
+                previous_watcher,
+                previous_serial,
+            )
+
+        threading.Thread(
+            target=worker,
+            name="mdreader-document-workspace-scan",
+            daemon=True,
+        ).start()
+
+    def open_workspace(self, root: Path, preferred_document: Path | None = None) -> None:
+        if self._closed:
+            return
+        try:
+            workspace = WorkspaceService(root)
+        except WorkspaceError as error:
+            self._show_toast(f"无法打开文件夹：{error}")
+            return
+
+        self._scan_generation += 1
+        generation = self._scan_generation
+        self._library.show_loading()
+        self.title_label.set_label(workspace.root.name or str(workspace.root))
+        changing_workspace = (
+            self._workspace is None or self._workspace.root != workspace.root
+        )
+        self._activate_workspace(workspace, install_watcher=False)
+        if self._watcher is None:
+            self._install_workspace_watcher(workspace, (workspace.root,))
+        previous_watcher = self._watcher
+        previous_serial = (
+            previous_watcher.change_serial if previous_watcher is not None else 0
+        )
+        if changing_workspace:
+            self._clear_current_document()
+
+        def worker() -> None:
+            try:
+                snapshot = workspace.scan_snapshot()
+            except Exception as error:
+                GLib.idle_add(
+                    self._finish_workspace_error,
+                    generation,
+                    workspace,
+                    error,
+                )
                 return
             GLib.idle_add(
                 self._finish_workspace_scan,
                 generation,
                 workspace,
-                entries,
+                snapshot,
                 preferred_document,
+                previous_watcher,
+                previous_serial,
             )
 
         threading.Thread(target=worker, name="mdreader-workspace-scan", daemon=True).start()
@@ -642,20 +774,19 @@ class MdReaderWindow(Adw.ApplicationWindow):
     def _on_search_changed(self, entry: Gtk.SearchEntry) -> None:
         self._document.find(entry.get_text())
 
-    def _finish_workspace_scan(
-        self,
-        generation: int,
-        workspace: WorkspaceService,
-        entries: tuple,
-        preferred_document: Path | None,
-    ) -> bool:
-        if generation != self._scan_generation:
-            return GLib.SOURCE_REMOVE
+    def _activate_workspace(
+        self, workspace: WorkspaceService, *, install_watcher: bool
+    ) -> None:
+        if self._closed:
+            return
         previous_root = self._workspace.root if self._workspace is not None else None
         changing_workspace = previous_root != workspace.root
         if changing_workspace and self._opencode is not None:
             self._opencode.close()
             self._opencode = None
+        if changing_workspace:
+            self._cancel_ai_request(reset_conversation=True)
+            self._watcher_unavailable_reported = False
         self._workspace = workspace
         if changing_workspace or self._patches is None:
             self._patches = PatchService(workspace.root)
@@ -676,11 +807,96 @@ class MdReaderWindow(Adw.ApplicationWindow):
             self._apply_model_options(self._opencode, self._available_models)
         else:
             self._load_model_options(self._opencode)
-        if self._watcher is not None:
+
+        if self._watcher is not None and (changing_workspace or install_watcher):
             self._watcher.close()
-        self._watcher = WorkspaceWatcher(workspace.root, self._on_workspace_changed)
+            self._watcher = None
+        if install_watcher:
+            self._install_workspace_watcher(workspace)
         self._settings.set_string("last-workspace", str(workspace.root))
-        self._library.set_entries(entries)
+
+    def _install_workspace_watcher(
+        self,
+        workspace: WorkspaceService,
+        directories: tuple[Path, ...] | None = None,
+    ) -> WorkspaceWatcher | None:
+        if self._closed or self._workspace is not workspace:
+            return None
+        # Build the new watcher before closing the old one so there is no
+        # window in which the workspace is not being monitored at all. The
+        # old watcher stays alive through a background scan and its events
+        # are reconciled by ScanCoordinator in the completion handler.
+        watcher = WorkspaceWatcher(
+            workspace.root,
+            lambda: self._refresh_workspace(workspace),
+            directories=directories,
+        )
+        previous = self._watcher
+        self._watcher = watcher
+        if previous is not None and previous is not watcher:
+            previous.close()
+        if not watcher.has_monitors and not self._watcher_unavailable_reported:
+            self._watcher_unavailable_reported = True
+            self._show_toast("无法监控工作区文件变化")
+        return watcher
+
+    def _finish_direct_document_scan(
+        self,
+        generation: int,
+        workspace: WorkspaceService,
+        snapshot: WorkspaceSnapshot,
+        previous_watcher: WorkspaceWatcher | None,
+        previous_serial: int,
+    ) -> bool:
+        if (
+            self._closed
+            or generation != self._scan_generation
+            or self._workspace is not workspace
+        ):
+            return GLib.SOURCE_REMOVE
+        self._library.set_entries(snapshot.entries)
+        self._install_workspace_watcher(workspace, snapshot.directories)
+        if ScanCoordinator(previous_watcher, previous_serial).should_schedule_followup():
+            GLib.idle_add(self._on_workspace_changed)
+        return GLib.SOURCE_REMOVE
+
+    def _finish_direct_document_scan_error(
+        self,
+        generation: int,
+        workspace: WorkspaceService,
+        error: Exception,
+        previous_watcher: WorkspaceWatcher | None,
+        previous_serial: int,
+    ) -> bool:
+        if (
+            self._closed
+            or generation != self._scan_generation
+            or self._workspace is not workspace
+        ):
+            return GLib.SOURCE_REMOVE
+        self._library.show_workspace_error(
+            f"文档已打开，但无法浏览所在文件夹：{error}"
+        )
+        self._install_workspace_watcher(workspace, (workspace.root,))
+        return GLib.SOURCE_REMOVE
+
+    def _finish_workspace_scan(
+        self,
+        generation: int,
+        workspace: WorkspaceService,
+        snapshot: WorkspaceSnapshot,
+        preferred_document: Path | None,
+        previous_watcher: WorkspaceWatcher | None,
+        previous_serial: int,
+    ) -> bool:
+        if (
+            self._closed
+            or generation != self._scan_generation
+            or self._workspace is not workspace
+        ):
+            return GLib.SOURCE_REMOVE
+        self._library.set_entries(snapshot.entries)
+        self._install_workspace_watcher(workspace, snapshot.directories)
         self.title_label.set_label(workspace.root.name)
 
         relative = preferred_document
@@ -689,9 +905,13 @@ class MdReaderWindow(Adw.ApplicationWindow):
             if stored:
                 relative = Path(stored)
         if relative is None or not self._is_valid_relative_document(relative):
-            relative = self._first_document(entries)
+            relative = self._first_document(snapshot.entries)
         if relative is not None:
             self._on_document_selected(relative)
+        else:
+            self._clear_current_document()
+        if ScanCoordinator(previous_watcher, previous_serial).should_schedule_followup():
+            GLib.idle_add(self._on_workspace_changed)
         return GLib.SOURCE_REMOVE
 
     def _load_model_options(self, gateway: OpenCodeGateway) -> None:
@@ -729,7 +949,11 @@ class MdReaderWindow(Adw.ApplicationWindow):
         gateway: OpenCodeGateway,
         models: tuple[str, ...],
     ) -> bool:
-        if generation != self._model_load_generation or gateway is not self._opencode:
+        if (
+            self._closed
+            or generation != self._model_load_generation
+            or gateway is not self._opencode
+        ):
             return GLib.SOURCE_REMOVE
         self._available_models = models
         self._apply_model_options(gateway, models)
@@ -739,6 +963,8 @@ class MdReaderWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _popup_model_menu_smoke(self) -> bool:
+        if self._closed:
+            return GLib.SOURCE_REMOVE
         if not self.is_active():
             return GLib.SOURCE_CONTINUE
         self._ai.popup_model_menu()
@@ -750,7 +976,11 @@ class MdReaderWindow(Adw.ApplicationWindow):
         gateway: OpenCodeGateway,
         _error: OpenCodeError,
     ) -> bool:
-        if generation != self._model_load_generation or gateway is not self._opencode:
+        if (
+            self._closed
+            or generation != self._model_load_generation
+            or gateway is not self._opencode
+        ):
             return GLib.SOURCE_REMOVE
         self._model_action.set_enabled(False)
         self._ai.set_model_options((), gateway.model)
@@ -800,34 +1030,192 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._ai.set_current_model(model, new_conversation=True)
 
     def _on_workspace_changed(self) -> None:
-        if self._workspace is None:
+        if self._workspace is None or self._closed:
             return
-        self.open_workspace(self._workspace.root, preferred_document=self._current_relative_path)
+        self._refresh_workspace(self._workspace)
 
-    def _finish_workspace_error(self, generation: int, error: Exception) -> bool:
-        if generation != self._scan_generation:
+    def _refresh_workspace(self, workspace: WorkspaceService) -> None:
+        """Refresh the tree without treating a watcher event as a new open."""
+
+        if self._closed or self._workspace is not workspace:
+            return
+        # Keep the current watcher alive while the scan runs. Closing it here
+        # would drop every event observed during the scan; instead the serial
+        # captured below lets the completion handler schedule a follow-up
+        # refresh when anything changed in the meantime.
+        previous_watcher = self._watcher
+        previous_serial = (
+            previous_watcher.change_serial if previous_watcher is not None else 0
+        )
+        self._scan_generation += 1
+        generation = self._scan_generation
+
+        def worker() -> None:
+            try:
+                snapshot = workspace.scan_snapshot()
+            except Exception as error:
+                GLib.idle_add(
+                    self._finish_workspace_error,
+                    generation,
+                    workspace,
+                    error,
+                    True,
+                )
+                return
+            GLib.idle_add(
+                self._finish_workspace_refresh,
+                generation,
+                workspace,
+                snapshot,
+                previous_watcher,
+                previous_serial,
+            )
+
+        threading.Thread(
+            target=worker,
+            name="mdreader-workspace-refresh",
+            daemon=True,
+        ).start()
+
+    def _finish_workspace_refresh(
+        self,
+        generation: int,
+        workspace: WorkspaceService,
+        snapshot: WorkspaceSnapshot,
+        previous_watcher: WorkspaceWatcher | None,
+        previous_serial: int,
+    ) -> bool:
+        if (
+            self._closed
+            or generation != self._scan_generation
+            or self._workspace is not workspace
+        ):
             return GLib.SOURCE_REMOVE
-        self._library.show_workspace_error(str(error))
-        self._show_toast("无法打开文件夹")
+
+        self._library.set_entries(snapshot.entries)
+        current_relative = self._current_relative_path
+        if current_relative is not None:
+            by_relative = {
+                document.relative_path: document
+                for document in snapshot.documents
+            }
+            current = by_relative.get(current_relative)
+            if current is not None:
+                if current.fingerprint == self._current_document_fingerprint:
+                    self._on_document_selected(
+                        current.relative_path,
+                        reload_document=False,
+                    )
+                else:
+                    # The current document changed on disk: record the active
+                    # heading before the reload so the reader can return to
+                    # the section the user was reading instead of jumping to
+                    # the top of the new render.
+                    self._pending_restore = make_restore(
+                        current.relative_path,
+                        current.identity,
+                        self._active_heading_slug,
+                    )
+                    self._on_document_selected(
+                        current.relative_path,
+                        preserve_restore=True,
+                    )
+            elif self._current_document_identity is not None:
+                renamed = tuple(
+                    document
+                    for document in snapshot.documents
+                    if document.identity == self._current_document_identity
+                )
+                if len(renamed) == 1:
+                    self._pending_restore = make_restore(
+                        renamed[0].relative_path,
+                        renamed[0].identity,
+                        self._active_heading_slug,
+                    )
+                    self._on_document_selected(
+                        renamed[0].relative_path,
+                        preserve_restore=True,
+                    )
+                else:
+                    self._clear_current_document()
+            else:
+                self._clear_current_document()
+
+        self._install_workspace_watcher(workspace, snapshot.directories)
+        if ScanCoordinator(previous_watcher, previous_serial).should_schedule_followup():
+            GLib.idle_add(self._on_workspace_changed)
         return GLib.SOURCE_REMOVE
 
-    def _on_document_selected(self, relative_path: Path) -> None:
-        if self._workspace is None:
+    def _finish_workspace_error(
+        self,
+        generation: int,
+        workspace: WorkspaceService,
+        error: Exception,
+        refresh: bool = False,
+    ) -> bool:
+        if (
+            self._closed
+            or generation != self._scan_generation
+            or self._workspace is not workspace
+        ):
+            return GLib.SOURCE_REMOVE
+        if refresh:
+            self._show_toast(f"无法刷新文件列表：{error}")
+        else:
+            self._library.show_workspace_error(str(error))
+            self._show_toast("无法打开文件夹")
+        self._install_workspace_watcher(workspace, (workspace.root,))
+        return GLib.SOURCE_REMOVE
+
+    def _on_document_selected(
+        self,
+        relative_path: Path,
+        *,
+        reload_document: bool = True,
+        preserve_restore: bool = False,
+    ) -> None:
+        if self._workspace is None or self._closed:
             return
+        workspace = self._workspace
         try:
-            document_path = self._workspace.validate_document(relative_path)
+            document = workspace.snapshot_document(relative_path)
+            document_path = workspace.validate_document(relative_path)
         except WorkspaceError as error:
             self._show_toast(str(error))
             return
 
-        self._current_relative_path = relative_path
+        self._current_relative_path = document.relative_path
         self._current_document_path = document_path
-        self._current_source = None
-        self._settings.set_string("last-document", str(relative_path))
+        self._current_document_identity = document.identity
+        self._current_document_fingerprint = document.fingerprint
+        self._settings.set_string("last-document", str(document.relative_path))
         self.title_label.set_label(document_path.name)
-        self._ai.set_document(relative_path)
+        self._ai.set_document(document.relative_path)
+        if not reload_document:
+            # Metadata-only update: the content is already current, so any
+            # in-flight reload keeps its restore while no new one is needed.
+            return
+
+        # A fresh load invalidates the heading recorded for the previous
+        # document; the bridge will report the new document's heading again.
+        self._active_heading_slug = ""
+        if not preserve_restore:
+            # A user-initiated selection must never restore the previous
+            # document's reading position. Only the watcher-triggered reload
+            # and rename paths pass preserve_restore=True after recording the
+            # restore request themselves.
+            self._pending_restore = None
+
+        if (
+            self._pending_fragment is not None
+            and self._pending_fragment[0] != document.relative_path
+        ):
+            self._pending_fragment = None
+        self._cancel_ai_request(reset_conversation=True)
+        self._current_source = None
         self._selection = DocumentSelection()
         self._ai.set_selection(self._selection)
+        self.ai_button.remove_css_class("accent")
         self._library.set_outline(())
         if self._library_split.get_collapsed():
             self._library_split.set_show_sidebar(False)
@@ -835,14 +1223,70 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._document.load_document(
             document_path,
             zoom=self._zoom,
-            workspace_root=self._workspace.root,
-            on_loaded=self._on_document_loaded,
-            on_error=self._on_document_error,
+            workspace_root=workspace.root,
+            on_loaded=lambda rendered: self._on_document_loaded(
+                workspace,
+                document,
+                rendered,
+            ),
+            on_error=lambda error: self._on_document_error(
+                workspace,
+                document,
+                error,
+            ),
         )
 
-    def _on_document_loaded(self, rendered: RenderedDocument) -> None:
+    def _clear_current_document(self) -> None:
+        was_current = self._current_relative_path is not None
+        self._pending_fragment = None
+        self._pending_restore = None
+        self._active_heading_slug = ""
+        self._cancel_ai_request(reset_conversation=True)
+        self._current_relative_path = None
+        self._current_document_path = None
+        self._current_document_identity = None
+        self._current_document_fingerprint = None
+        self._current_source = None
+        self._selection = DocumentSelection()
+        self._clear_pending_edit()
+        self._settings.set_string("last-document", "")
+        self._library.set_outline(())
+        self._ai.set_document(None)
+        self._ai.set_selection(self._selection)
+        self.ai_button.remove_css_class("accent")
+        self._document.invalidate(show_empty=True)
+        if self._workspace is None:
+            self.title_label.set_label("MD Reader")
+        else:
+            self.title_label.set_label(
+                self._workspace.root.name or str(self._workspace.root)
+            )
+        if was_current and os.environ.get("MDREADER_TEST_WATCHER_ACCEPT") == "1":
+            print("MDREADER_TEST_WATCHER_CLEARED", flush=True)
+            GLib.timeout_add(1000, self._quit_presented_smoke)
+    def _on_document_loaded(
+        self,
+        workspace: WorkspaceService,
+        document: DocumentSnapshot,
+        rendered: RenderedDocument,
+    ) -> None:
+        if (
+            self._closed
+            or self._workspace is not workspace
+            or self._current_relative_path != document.relative_path
+            or self._current_document_identity != document.identity
+        ):
+            return
         self._current_source = rendered.source
         self._library.set_outline(rendered.outline)
+        expected_document = os.environ.pop(
+            "MDREADER_TEST_EXPECT_DOCUMENT", ""
+        ).strip()
+        if expected_document and self._current_document_path is not None:
+            actual = str(self._current_document_path.resolve(strict=False))
+            expected = str(Path(expected_document).resolve(strict=False))
+            marker = "OK" if actual == expected else "FAIL"
+            print(f"MDREADER_TEST_DOCUMENT_{marker}={actual}", flush=True)
         preview_ai = os.environ.pop("MDREADER_TEST_AI_PREVIEW", "") == "1"
         preview_thinking = os.environ.pop("MDREADER_TEST_AI_THINKING", "") == "1"
         if preview_ai or preview_thinking:
@@ -891,6 +1335,13 @@ pacstrap -K /mnt base linux linux-firmware
         self._document.scroll_to_heading(slug)
         return GLib.SOURCE_REMOVE
 
+    def _fragment_click_smoke(self, href: str) -> bool:
+        if self._closed:
+            return GLib.SOURCE_REMOVE
+        self._document.click_link_for_test(href)
+        GLib.timeout_add(2500, self._quit_presented_smoke)
+        return GLib.SOURCE_REMOVE
+
     def _scroll_smoke_source(self, line: int) -> bool:
         self._document.scroll_to_source(line)
         return GLib.SOURCE_REMOVE
@@ -900,7 +1351,27 @@ pacstrap -K /mnt base linux linux-firmware
         self._on_ai_send(question, edit_mode)
         return GLib.SOURCE_REMOVE
 
-    def _on_document_error(self, error: Exception) -> None:
+    def _on_document_error(
+        self,
+        workspace: WorkspaceService,
+        document: DocumentSnapshot,
+        error: Exception,
+    ) -> None:
+        if (
+            self._closed
+            or self._workspace is not workspace
+            or self._current_relative_path != document.relative_path
+            or self._current_document_identity != document.identity
+        ):
+            return
+        if (
+            self._pending_fragment is not None
+            and self._pending_fragment[0] == document.relative_path
+        ):
+            self._pending_fragment = None
+        # A failed render cannot restore a reading position; drop the request
+        # so a later successful load does not scroll to a stale heading.
+        self._pending_restore = None
         self._show_toast(f"无法渲染文档：{error}")
 
     def _on_outline_selected(self, item: OutlineItem) -> None:
@@ -909,9 +1380,45 @@ pacstrap -K /mnt base linux linux-firmware
             self._library_split.set_show_sidebar(False)
 
     def _on_active_heading_changed(self, _view: DocumentView, slug: str) -> None:
+        self._active_heading_slug = slug
         self._library.set_active_outline(slug)
+        if os.environ.get("MDREADER_TEST_WATCHER_ACCEPT") == "1":
+            print(f"MDREADER_TEST_WATCHER_HEADING={slug}", flush=True)
 
     def _on_document_presented(self, _view: DocumentView) -> None:
+        if self._closed:
+            return
+        action = resolve_presented_action(
+            self._pending_fragment,
+            self._pending_restore,
+            self._current_relative_path,
+            self._current_document_identity,
+        )
+        if action.kind == "fragment":
+            # An explicit #fragment always wins over automatic position
+            # restore and must not be skipped by a smooth heading scroll.
+            self._pending_fragment = None
+            self._pending_restore = None
+            self._document.scroll_to_heading(action.slug)
+        elif action.kind == "restore":
+            # Watcher-triggered reloads and renames return to the section the
+            # user was reading. Use an instant scroll so the page does not
+            # visibly glide from the top after every external change.
+            self._pending_restore = None
+            self._document.scroll_to_heading(action.slug, smooth=False)
+        if os.environ.get("MDREADER_TEST_WATCHER_ACCEPT") == "1":
+            self._watcher_accept_presents = (
+                getattr(self, "_watcher_accept_presents", 0) + 1
+            )
+            print(
+                f"MDREADER_TEST_WATCHER_PRESENT={self._watcher_accept_presents}",
+                flush=True,
+            )
+        fragment_click = os.environ.pop("MDREADER_TEST_FRAGMENT_CLICK", "").strip()
+        if fragment_click:
+            # The click only fires after the first document-presented, so the
+            # harness always observes PRESENT=1 before the link is activated.
+            GLib.timeout_add(400, self._fragment_click_smoke, fragment_click)
         if self._test_source_line:
             source_line = self._test_source_line
             self._test_source_line = 0
@@ -920,8 +1427,11 @@ pacstrap -K /mnt base linux linux-firmware
             self._test_ctrl_wheel = True
             self._document.dispatch_ctrl_wheel_for_test()
         if os.environ.pop("MDREADER_TEST_QUIT_ON_PRESENT", "") == "1":
+            selection_scroll_test = (
+                os.environ.get("MDREADER_TEST_SELECTION_SCROLL") == "1"
+            )
             GLib.timeout_add(
-                600 if self._test_ctrl_wheel else 200,
+                600 if self._test_ctrl_wheel or selection_scroll_test else 200,
                 self._quit_presented_smoke,
             )
 
@@ -932,6 +1442,8 @@ pacstrap -K /mnt base linux linux-firmware
         return GLib.SOURCE_REMOVE
 
     def _on_selection_changed(self, _view: DocumentView, selection: DocumentSelection) -> None:
+        if self._closed:
+            return
         self._selection = selection
         self._ai.set_selection(selection)
         if selection.is_empty:
@@ -955,6 +1467,9 @@ pacstrap -K /mnt base linux linux-firmware
             self._ai.show_error("请先选择需要修改的文档行")
             return
         try:
+            gateway = self._opencode
+            self._ai_request_generation += 1
+            request_generation = self._ai_request_generation
             context = self._context_builder.from_source(
                 self._current_source,
                 self._current_relative_path,
@@ -974,38 +1489,89 @@ pacstrap -K /mnt base linux linux-firmware
             self._pending_edit_base_hash = context.source_hash if edit_mode else ""
             self._ai.append_user(question)
             self._ai.begin_assistant(edit_mode=edit_mode)
-            self._opencode.send(
+            gateway.send(
                 prompt,
-                on_text=self._on_ai_text,
-                on_done=self._on_ai_done,
-                on_error=self._on_ai_error,
+                on_text=lambda text: self._on_ai_text(
+                    request_generation,
+                    gateway,
+                    text,
+                ),
+                on_done=lambda event: self._on_ai_done(
+                    request_generation,
+                    gateway,
+                    event,
+                ),
+                on_error=lambda error: self._on_ai_error(
+                    request_generation,
+                    gateway,
+                    error,
+                ),
             )
         except (OSError, OpenCodeError) as error:
             self._clear_pending_edit()
             self._ai.show_error(str(error))
 
-    def _on_ai_text(self, text: str) -> bool:
+    def _is_current_ai_request(
+        self,
+        request_generation: int,
+        gateway: OpenCodeGateway,
+    ) -> bool:
+        return (
+            not self._closed
+            and request_generation == self._ai_request_generation
+            and gateway is self._opencode
+        )
+
+    def _on_ai_text(
+        self,
+        request_generation: int,
+        gateway: OpenCodeGateway,
+        text: str,
+    ) -> bool:
+        if not self._is_current_ai_request(request_generation, gateway):
+            return GLib.SOURCE_REMOVE
         if self._pending_edit:
             self._pending_edit_text += text
         else:
             self._ai.append_assistant_text(text)
         return GLib.SOURCE_REMOVE
 
-    def _on_ai_done(self, _event: dict) -> bool:
+    def _on_ai_done(
+        self,
+        request_generation: int,
+        gateway: OpenCodeGateway,
+        _event: dict,
+    ) -> bool:
+        if not self._is_current_ai_request(request_generation, gateway):
+            return GLib.SOURCE_REMOVE
         if self._pending_edit:
             self._finish_edit_proposal()
         else:
             self._ai.finish_assistant()
         return GLib.SOURCE_REMOVE
 
-    def _on_ai_error(self, error: Exception) -> bool:
+    def _on_ai_error(
+        self,
+        request_generation: int,
+        gateway: OpenCodeGateway,
+        error: Exception,
+    ) -> bool:
+        if not self._is_current_ai_request(request_generation, gateway):
+            return GLib.SOURCE_REMOVE
         self._ai.show_error(str(error))
         self._clear_pending_edit()
         return GLib.SOURCE_REMOVE
 
     def _on_ai_cancel(self) -> None:
+        self._cancel_ai_request(reset_conversation=False)
+
+    def _cancel_ai_request(self, *, reset_conversation: bool) -> None:
+        self._ai_request_generation += 1
         if self._opencode is not None:
-            self._opencode.cancel()
+            self._opencode.reset_session()
+        self._clear_pending_edit()
+        if reset_conversation:
+            self._ai.reset_conversation()
 
     def _finish_edit_proposal(self) -> None:
         selection = self._pending_edit_selection
@@ -1109,15 +1675,31 @@ pacstrap -K /mnt base linux linux-firmware
             self._show_toast(str(error))
 
     def _on_local_document(self, _view: DocumentView, uri: str) -> None:
-        if self._workspace is None:
+        if self._workspace is None or self._closed:
             return
-        path = Path(unquote(urlparse(uri).path))
         try:
-            relative = self._workspace.relative_path(path)
-            self._workspace.validate_document(relative)
+            link = parse_local_document_uri(uri)
+        except LocalDocumentLinkError as error:
+            self._show_toast(f"无法打开链接：{error}")
+            return
+
+        try:
+            relative = self._workspace.relative_path(link.path)
         except WorkspaceError:
             self._show_toast("链接的文档位于当前工作区之外")
             return
+        try:
+            self._workspace.validate_document(relative)
+        except WorkspaceError as error:
+            self._show_toast(str(error))
+            return
+
+        if relative == self._current_relative_path:
+            if link.fragment:
+                self._document.scroll_to_heading(link.fragment)
+            return
+
+        self._pending_fragment = (relative, link.fragment) if link.fragment else None
         self._on_document_selected(relative)
 
     def _change_zoom(self, amount: int) -> None:

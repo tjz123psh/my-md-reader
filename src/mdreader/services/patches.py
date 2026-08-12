@@ -41,7 +41,7 @@ class PatchService:
         start = value.get("startLine")
         end = value.get("endLine")
         replacement = value.get("replacement")
-        if not isinstance(start, int) or not isinstance(end, int) or not isinstance(replacement, str):
+        if type(start) is not int or type(end) is not int or not isinstance(replacement, str):
             raise PatchError("修改建议中包含无效字段")
         if start != expected_start or end != expected_end:
             raise PatchError("模型尝试修改选中范围之外的行")

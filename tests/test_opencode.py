@@ -101,6 +101,103 @@ class OpenCodeGatewayTests(unittest.TestCase):
         self.assertEqual(done[0]["type"], "step_finish")
         self.assertEqual(errors, [])
 
+    def test_stream_rejects_a_valid_non_object_json_event_with_one_terminal_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "fake-opencode"
+            executable.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' '[]'\n",
+                encoding="utf-8",
+            )
+            executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+            gateway = OpenCodeGateway(root, executable=str(executable))
+            self.addCleanup(gateway.close)
+            done: list[dict] = []
+            errors: list[Exception] = []
+            with gateway._lock:
+                gateway._active = True
+
+            with patch(
+                "mdreader.services.opencode.GLib.idle_add",
+                side_effect=lambda callback, value: callback(value),
+            ):
+                gateway._stream(
+                    [str(executable)],
+                    lambda _text: None,
+                    done.append,
+                    errors.append,
+                )
+
+        self.assertEqual(done, [])
+        self.assertEqual(len(errors), 1)
+        self.assertFalse(gateway.running)
+
+    def test_stream_rejects_a_non_object_text_part_with_one_terminal_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "fake-opencode"
+            executable.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' '{\"type\":\"text\",\"part\":\"not-an-object\"}'\n",
+                encoding="utf-8",
+            )
+            executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+            gateway = OpenCodeGateway(root, executable=str(executable))
+            self.addCleanup(gateway.close)
+            done: list[dict] = []
+            errors: list[Exception] = []
+            with gateway._lock:
+                gateway._active = True
+
+            with patch(
+                "mdreader.services.opencode.GLib.idle_add",
+                side_effect=lambda callback, value: callback(value),
+            ):
+                gateway._stream(
+                    [str(executable)],
+                    lambda _text: None,
+                    done.append,
+                    errors.append,
+                )
+
+        self.assertEqual(done, [])
+        self.assertEqual(len(errors), 1)
+        self.assertFalse(gateway.running)
+
+    def test_stream_requires_step_finish_before_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "fake-opencode"
+            executable.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' '{\"type\":\"text\",\"part\":{\"text\":\"partial\"}}'\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+            gateway = OpenCodeGateway(root, executable=str(executable))
+            self.addCleanup(gateway.close)
+            done: list[dict] = []
+            errors: list[Exception] = []
+            with gateway._lock:
+                gateway._active = True
+
+            with patch(
+                "mdreader.services.opencode.GLib.idle_add",
+                side_effect=lambda callback, value: callback(value),
+            ):
+                gateway._stream(
+                    [str(executable)],
+                    lambda _text: None,
+                    done.append,
+                    errors.append,
+                )
+
+        self.assertEqual(done, [])
+        self.assertEqual(len(errors), 1)
+        self.assertFalse(gateway.running)
+
     def test_send_includes_existing_session_without_auto_permission(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

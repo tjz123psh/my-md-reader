@@ -61,6 +61,7 @@ class OpenCodeGateway:
         self._lock = threading.Lock()
         self._active = False
         self._closed = False
+        self._session_generation = 0
         self._cancel_requested = threading.Event()
 
     @property
@@ -87,6 +88,15 @@ class OpenCodeGateway:
                 raise OpenCodeError("请等待当前回答完成后再切换模型")
             self.model = model
             self.session_id = ""
+            self._session_generation += 1
+
+    def reset_session(self) -> None:
+        """Cancel the active answer and prevent it from reviving an old session."""
+
+        self.cancel()
+        with self._lock:
+            self.session_id = ""
+            self._session_generation += 1
 
     def available_models(self) -> tuple[str, ...]:
         command = [self.executable, "models", "opencode", "--pure"]
@@ -138,6 +148,8 @@ class OpenCodeGateway:
                 raise OpenCodeError("已有回答正在生成")
             self._active = True
             self._cancel_requested.clear()
+            session_id = self.session_id
+            session_generation = self._session_generation
         command = [
             self.executable,
             "run",
@@ -151,13 +163,19 @@ class OpenCodeGateway:
             "--dir",
             str(self.runtime_directory),
         ]
-        if self.session_id:
-            command.extend(["--session", self.session_id])
+        if session_id:
+            command.extend(["--session", session_id])
         command.append(prompt)
 
         thread = threading.Thread(
             target=self._stream,
-            args=(command, on_text, on_done, on_error),
+            args=(
+                command,
+                on_text,
+                on_done,
+                on_error,
+                session_generation,
+            ),
             name="mdreader-opencode",
             daemon=True,
         )
@@ -189,71 +207,106 @@ class OpenCodeGateway:
         on_text: Callable[[str], None],
         on_done: Callable[[dict], None],
         on_error: Callable[[Exception], None],
+        session_generation: int | None = None,
     ) -> None:
+        process: subprocess.Popen[str] | None = None
+        stderr_file = None
+        terminal_callback: Callable[[object], None] = on_error
+        terminal_value: object = OpenCodeError("OpenCode 流式输出意外结束")
         try:
             if self._cancel_requested.is_set():
-                with self._lock:
-                    self._active = False
-                GLib.idle_add(on_error, OpenCodeError("回答已取消"))
-                return
+                raise OpenCodeError("回答已取消")
+            stderr_file = tempfile.TemporaryFile(
+                mode="w+t",
+                encoding="utf-8",
+                errors="replace",
+            )
             process = subprocess.Popen(
                 command,
                 cwd=self.runtime_directory,
                 env=self._subprocess_environment(),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=stderr_file,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
             )
-        except OSError as error:
             with self._lock:
-                self._active = False
-            GLib.idle_add(on_error, OpenCodeError(str(error)))
-            return
+                self._process = process
+            if self._cancel_requested.is_set() and process.poll() is None:
+                process.terminate()
 
-        with self._lock:
-            self._process = process
-        if self._cancel_requested.is_set() and process.poll() is None:
-            process.terminate()
-        finish: dict = {}
-        terminal_callback: Callable[[object], None]
-        terminal_value: object
-        try:
-            assert process.stdout is not None
+            finish: dict | None = None
+            if process.stdout is None:
+                raise OpenCodeError("无法读取 OpenCode 标准输出")
             for line in process.stdout:
                 try:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(event, dict):
+                    raise OpenCodeError("OpenCode JSON 事件必须是对象")
                 session_id = event.get("sessionID")
                 if isinstance(session_id, str):
-                    self.session_id = session_id
+                    with self._lock:
+                        if (
+                            session_generation is None
+                            or session_generation == self._session_generation
+                        ):
+                            self.session_id = session_id
                 if event.get("type") == "text":
-                    text = (event.get("part") or {}).get("text")
+                    part = event.get("part")
+                    if not isinstance(part, dict):
+                        raise OpenCodeError("OpenCode text 事件的 part 必须是对象")
+                    text = part.get("text")
                     if isinstance(text, str) and text:
                         GLib.idle_add(on_text, text)
                 elif event.get("type") == "step_finish":
                     finish = event
             return_code = process.wait()
-            stderr = process.stderr.read().strip() if process.stderr else ""
-            if return_code == 0:
-                terminal_callback = on_done
-                terminal_value = finish
-            elif return_code < 0:
+            stderr_file.seek(0)
+            stderr = stderr_file.read().strip()
+            if self._cancel_requested.is_set() or return_code < 0:
                 terminal_callback = on_error
                 terminal_value = OpenCodeError("回答已取消")
-            else:
+            elif return_code != 0:
                 message = stderr or f"OpenCode 异常退出，状态码：{return_code}"
                 terminal_callback = on_error
                 terminal_value = OpenCodeError(message)
+            elif finish is None:
+                message = "OpenCode 输出在 step_finish 完成事件前结束"
+                if stderr:
+                    message = f"{message}：{stderr}"
+                terminal_callback = on_error
+                terminal_value = OpenCodeError(message)
+            else:
+                terminal_callback = on_done
+                terminal_value = finish
+        except Exception as error:
+            terminal_callback = on_error
+            if self._cancel_requested.is_set():
+                terminal_value = OpenCodeError("回答已取消")
+            elif isinstance(error, OpenCodeError):
+                terminal_value = error
+            else:
+                terminal_value = OpenCodeError(f"无法读取 OpenCode 输出：{error}")
         finally:
-            if process.stdout is not None:
-                process.stdout.close()
-            if process.stderr is not None:
-                process.stderr.close()
+            if process is not None:
+                if process.poll() is None:
+                    try:
+                        process.terminate()
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    except OSError:
+                        pass
+                if process.stdout is not None:
+                    process.stdout.close()
+            if stderr_file is not None:
+                stderr_file.close()
             with self._lock:
                 if self._process is process:
                     self._process = None

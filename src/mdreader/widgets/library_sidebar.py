@@ -43,11 +43,23 @@ class LibrarySidebar(Gtk.Box):
             title="打开 Markdown 文件夹",
             description="选择文件夹以浏览其中的 Markdown 文档",
         )
-        open_button = Gtk.Button(label="打开文件夹", action_name="win.open-folder")
-        open_button.add_css_class("pill")
-        open_button.add_css_class("suggested-action")
-        open_button.set_halign(Gtk.Align.CENTER)
-        self._file_empty.set_child(open_button)
+        open_actions = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+            halign=Gtk.Align.CENTER,
+        )
+        open_document = Gtk.Button(
+            label="打开文档", action_name="win.open-document"
+        )
+        open_document.add_css_class("pill")
+        open_document.add_css_class("suggested-action")
+        open_actions.append(open_document)
+        open_folder = Gtk.Button(
+            label="打开文件夹", action_name="win.open-folder"
+        )
+        open_folder.add_css_class("pill")
+        open_actions.append(open_folder)
+        self._file_empty.set_child(open_actions)
         self._files_stack.add_named(self._file_empty, "empty")
 
         self._file_loading = Adw.StatusPage(

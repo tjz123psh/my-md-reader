@@ -1,6 +1,34 @@
 (() => {
   "use strict";
 
+  const documentToken = document.documentElement.dataset.mdreaderToken || "";
+  // Keep native bridge endpoints explicit. Besides being easier to audit,
+  // this prevents a typo in a dynamic handler name from silently dropping
+  // document lifecycle, selection, outline, or zoom updates.
+  const postReady = () => {
+    window.webkit?.messageHandlers?.ready?.postMessage(JSON.stringify({
+      documentToken,
+    }));
+  };
+  const postSelection = (payload) => {
+    window.webkit?.messageHandlers?.selection?.postMessage(JSON.stringify({
+      ...payload,
+      documentToken,
+    }));
+  };
+  const postOutline = (payload) => {
+    window.webkit?.messageHandlers?.outline?.postMessage(JSON.stringify({
+      ...payload,
+      documentToken,
+    }));
+  };
+  const postZoom = (payload) => {
+    window.webkit?.messageHandlers?.zoom?.postMessage(JSON.stringify({
+      ...payload,
+      documentToken,
+    }));
+  };
+
   const mappedBlock = (node) => {
     if (!node) return null;
     const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
@@ -22,44 +50,65 @@
     return null;
   };
 
-  const clearAnchors = () => {
-    document.querySelectorAll('[data-selection-anchor="true"]').forEach((node) => {
-      node.removeAttribute("data-selection-anchor");
-    });
+  const clearSelectionMarker = () => {
+    const main = document.querySelector("main");
+    if (!main) return;
+    main.removeAttribute("data-selection-active");
+    main.style.removeProperty("--selection-anchor-top");
+    main.style.removeProperty("--selection-anchor-height");
   };
 
   const reportSelection = () => {
-    clearAnchors();
+    clearSelectionMarker();
     const selection = window.getSelection();
     const text = selection ? selection.toString().trim() : "";
 
     if (!selection || selection.rangeCount === 0 || !text) {
-      window.webkit?.messageHandlers?.selection?.postMessage(JSON.stringify({ text: "" }));
+      postSelection({ text: "" });
       return;
     }
 
     const range = selection.getRangeAt(0);
     const first = mappedBlock(range.startContainer);
     const last = mappedBlock(range.endContainer) || first;
-    if (!first) return;
+    if (!first) {
+      postSelection({ text: "" });
+      return;
+    }
 
-    first.setAttribute("data-selection-anchor", "true");
+    const main = document.querySelector("main");
+    if (main) {
+      const firstRect = first.getBoundingClientRect();
+      const mainRect = main.getBoundingClientRect();
+      main.style.setProperty(
+        "--selection-anchor-top",
+        `${firstRect.top - mainRect.top}px`,
+      );
+      main.style.setProperty(
+        "--selection-anchor-height",
+        `${Math.max(3, firstRect.height)}px`,
+      );
+      main.setAttribute("data-selection-active", "true");
+    }
+
     const startLine = Number.parseInt(first.dataset.sourceStart || "0", 10);
     const endLine = Number.parseInt(last.dataset.sourceEnd || first.dataset.sourceEnd || "0", 10);
 
-    window.webkit?.messageHandlers?.selection?.postMessage(JSON.stringify({
+    postSelection({
       text: text.slice(0, 12000),
       startLine,
       endLine,
       heading: headingFor(first),
-    }));
+    });
   };
 
   let timer = 0;
-  document.addEventListener("selectionchange", () => {
+  const scheduleSelectionReport = () => {
     window.clearTimeout(timer);
     timer = window.setTimeout(reportSelection, 80);
-  });
+  };
+  document.addEventListener("selectionchange", scheduleSelectionReport);
+  window.addEventListener("resize", scheduleSelectionReport, { passive: true });
 
   const headings = Array.from(document.querySelectorAll(
     "h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]",
@@ -95,7 +144,7 @@
     const id = active?.id || "";
     if (id === activeHeadingId) return;
     activeHeadingId = id;
-    window.webkit?.messageHandlers?.outline?.postMessage(JSON.stringify({ id }));
+    postOutline({ id });
   };
 
   const scheduleActiveHeading = () => {
@@ -130,6 +179,15 @@
     }
   };
 
+  const cancelSmoothScroll = () => {
+    if (smoothScrollFrame) {
+      window.cancelAnimationFrame(smoothScrollFrame);
+      smoothScrollFrame = 0;
+    }
+    smoothScrollStart = window.scrollY;
+    smoothScrollTarget = window.scrollY;
+  };
+
   const queueSmoothScroll = (delta) => {
     const maximum = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     smoothScrollStart = window.scrollY;
@@ -140,6 +198,14 @@
       smoothScrollFrame = window.requestAnimationFrame(animateSmoothScroll);
     }
   };
+
+  // A discrete-wheel animation must yield as soon as the reader starts a
+  // direct pointer interaction. Otherwise the remaining animation frames move
+  // the text underneath a drag selection and make the page appear to jump.
+  window.addEventListener("pointerdown", cancelSmoothScroll, {
+    capture: true,
+    passive: true,
+  });
 
   const zoomBounds = (percent) => Math.max(75, Math.min(200, Number(percent) || 100));
 
@@ -185,6 +251,7 @@
       }
     }
     scheduleActiveHeading();
+    scheduleSelectionReport();
     return bounded;
   };
 
@@ -217,10 +284,10 @@
     const requested = zoomBounds(current + delta);
     if (requested !== current) {
       setZoom(requested, zoomAnchorY, zoomAnchorX);
-      window.webkit?.messageHandlers?.zoom?.postMessage(JSON.stringify({
+      postZoom({
         percent: requested,
         anchorY: zoomAnchorY,
-      }));
+      });
     }
   };
 
@@ -283,9 +350,14 @@
   window.mdReader = {
     setZoom,
     setTheme,
-    scrollToHeading(id) {
+    scrollToHeading(id, behavior) {
       const target = document.getElementById(id);
-      if (target) target.scrollIntoView({ block: "start", behavior: motionBehavior });
+      if (!target) return;
+      // An explicit "auto" request (e.g. restoring a reading position after
+      // a watcher-triggered reload) must not animate, otherwise the page
+      // visibly glides from the top and the reader appears to jump.
+      const motion = behavior === "auto" ? "auto" : motionBehavior;
+      target.scrollIntoView({ block: "start", behavior: motion });
     },
     scrollToSource(line) {
       const target = Array.from(document.querySelectorAll("[data-source-start]")).find((node) => {
@@ -297,8 +369,18 @@
     },
     clearSelection() {
       window.getSelection()?.removeAllRanges();
-      clearAnchors();
       reportSelection();
     },
   };
+
+  const announceReady = () => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(postReady);
+    });
+  };
+  if (document.readyState === "complete") {
+    announceReady();
+  } else {
+    window.addEventListener("load", announceReady, { once: true });
+  }
 })();

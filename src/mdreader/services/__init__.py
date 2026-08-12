@@ -12,14 +12,28 @@ from .themes import (
     get_theme,
     normalize_theme_id,
 )
-from .workspace import FileEntry, WorkspaceError, WorkspaceService, WorkspaceWatcher
+from .workspace import (
+    DocumentSnapshot,
+    FileEntry,
+    LocalDocumentLink,
+    LocalDocumentLinkError,
+    ScanCoordinator,
+    WorkspaceError,
+    WorkspaceService,
+    WorkspaceSnapshot,
+    WorkspaceWatcher,
+    parse_local_document_uri,
+)
 
 __all__ = [
     "AiMarkdownBlock",
     "AiMarkdownCell",
     "AiMarkdownRenderer",
     "ContextBuilder",
+    "DocumentSnapshot",
     "FileEntry",
+    "LocalDocumentLink",
+    "LocalDocumentLinkError",
     "MarkdownRenderer",
     "MarkdownUnavailableError",
     "OpenCodeError",
@@ -27,6 +41,7 @@ __all__ = [
     "PatchError",
     "PatchProposal",
     "PatchService",
+    "ScanCoordinator",
     "DEFAULT_THEME_ID",
     "THEMES",
     "ReaderTheme",
@@ -36,5 +51,7 @@ __all__ = [
     "normalize_theme_id",
     "WorkspaceError",
     "WorkspaceService",
+    "WorkspaceSnapshot",
     "WorkspaceWatcher",
+    "parse_local_document_uri",
 ]

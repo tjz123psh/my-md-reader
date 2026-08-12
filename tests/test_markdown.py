@@ -72,6 +72,42 @@ class MarkdownRendererTests(unittest.TestCase):
     def test_links_are_hardened(self) -> None:
         self.assertIn('rel="noreferrer noopener"', self.rendered.html)
 
+    def test_reader_link_policy_preserves_fragments_and_blocks_local_non_markdown(self) -> None:
+        source = (
+            Path(__file__).parents[1] / "src/mdreader/widgets/document_view.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("WebKit.NavigationType.LINK_CLICKED", source)
+        self.assertIn('self.emit("open-local-document", uri)', source)
+        self.assertNotIn('self.emit("open-local-document", uri.partition("#")[0])', source)
+        self.assertIn('if scheme == "file":', source)
+        self.assertIn("decision.ignore()", source)
+
+    def test_reader_bridge_tags_messages_with_the_document_token(self) -> None:
+        bridge = (
+            Path(__file__).parents[1] / "src/resources/reader/bridge.js"
+        ).read_text(encoding="utf-8")
+        source = (
+            Path(__file__).parents[1] / "src/mdreader/widgets/document_view.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("const documentToken =", bridge)
+        self.assertIn("documentToken", bridge)
+        self.assertIn('payload.get("documentToken") != self._presented_token', source)
+
+    def test_document_presentation_uses_a_tokened_ready_bridge(self) -> None:
+        bridge = (
+            Path(__file__).parents[1] / "src/resources/reader/bridge.js"
+        ).read_text(encoding="utf-8")
+        source = (
+            Path(__file__).parents[1] / "src/mdreader/widgets/document_view.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("messageHandlers?.ready", bridge)
+        self.assertIn("documentToken", bridge)
+        self.assertIn('register_script_message_handler("ready", None)', source)
+        self.assertIn('payload.get("documentToken") != self._presented_token', source)
+        self.assertIn('window.addEventListener("load", announceReady', bridge)
+        self.assertNotIn('connect("load-changed"', source)
+        self.assertNotIn("def _on_load_changed", source)
+
     def test_title_is_escaped_and_zoom_is_bounded(self) -> None:
         self.assertIn("Reader &lt;fixture&gt; &amp; &quot;safety&quot;", self.rendered.html)
         self.assertIn("--reader-zoom: 1.30", self.rendered.html)
@@ -115,6 +151,40 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("event.preventDefault();", self.rendered.html)
         self.assertIn("messageHandlers?.zoom", self.rendered.html)
         self.assertIn('}, { passive: false });', self.rendered.html)
+
+    def test_pointer_selection_cancels_pending_wheel_animation(self) -> None:
+        self.assertIn("const cancelSmoothScroll = () =>", self.rendered.html)
+        self.assertIn(
+            'window.addEventListener("pointerdown", cancelSmoothScroll',
+            self.rendered.html,
+        )
+        self.assertIn("window.cancelAnimationFrame(smoothScrollFrame)", self.rendered.html)
+
+    def test_selection_reporting_does_not_add_layout_affecting_dom_markers(self) -> None:
+        self.assertNotIn("data-selection-anchor", self.rendered.html)
+        self.assertIn('main.setAttribute("data-selection-active", "true")', self.rendered.html)
+        self.assertIn('main[data-selection-active="true"]::before', self.rendered.html)
+        self.assertIn("position: absolute", self.rendered.html)
+        self.assertIn("messageHandlers?.selection", self.rendered.html)
+        self.assertIn("startLine", self.rendered.html)
+        self.assertIn("endLine", self.rendered.html)
+
+    def test_unmapped_nonempty_selection_clears_stale_selection_context(self) -> None:
+        bridge = (
+            Path(__file__).parents[1] / "src/resources/reader/bridge.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '''if (!first) {
+      postSelection({ text: "" });
+      return;
+    }''',
+            bridge,
+        )
+        self.assertNotIn(
+            'messageHandlers?.selection?.postMessage(JSON.stringify({ text: "" }))',
+            bridge,
+        )
+        self.assertNotIn("if (!first) return;", bridge)
 
     def test_zoom_updates_once_and_keeps_the_pointed_block_anchored(self) -> None:
         self.assertIn('target.style.setProperty("--reader-zoom"', self.rendered.html)
@@ -201,6 +271,39 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn('"open-document": self._on_open_document', window)
         self.assertIn("dialog.open(self", window)
         self.assertIn('action: "win.open-document"', blueprint)
+
+    def test_library_empty_state_offers_document_and_folder_opening(self) -> None:
+        source = (
+            Path(__file__).parents[1] / "src/mdreader/widgets/library_sidebar.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('action_name="win.open-document"', source)
+        self.assertIn('action_name="win.open-folder"', source)
+
+    def test_last_session_restore_keeps_the_original_workspace_root(self) -> None:
+        source = (
+            Path(__file__).parents[1] / "src/mdreader/window.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "self.open_document(document, workspace_root=root)",
+            source,
+        )
+
+    def test_workspace_refresh_separates_tree_scan_from_document_reload(self) -> None:
+        source = (
+            Path(__file__).parents[1] / "src/mdreader/window.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("def _refresh_workspace", source)
+        self.assertIn("reload_document=False", source)
+        self.assertIn("def _clear_current_document", source)
+        self.assertIn("document_identity", source)
+
+    def test_window_async_callbacks_are_guarded_by_close_and_request_generations(self) -> None:
+        source = (
+            Path(__file__).parents[1] / "src/mdreader/window.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("self._closed = False", source)
+        self.assertIn("self._ai_request_generation", source)
+        self.assertIn("self._document.invalidate()", source)
 
     def test_five_theme_picker_is_exposed_in_the_primary_menu(self) -> None:
         blueprint = (

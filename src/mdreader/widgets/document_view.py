@@ -6,6 +6,7 @@ import os
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import gi
 
@@ -37,6 +38,10 @@ class DocumentView(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._renderer = MarkdownRenderer()
         self._load_generation = 0
+        self._presented_generation = 0
+        self._presented_token = ""
+        self._notified_generation = 0
+        self._closed = False
         self._zoom = 100
         self._theme = theme or get_theme("")
         self._document_path: Path | None = None
@@ -99,6 +104,23 @@ class DocumentView(Gtk.Box):
     def webkit_available(self) -> bool:
         return self._web_view is not None
 
+    def invalidate(self, *, show_empty: bool = False) -> None:
+        self._load_generation += 1
+        self._presented_generation = 0
+        self._presented_token = ""
+        self._notified_generation = 0
+        self._document_path = None
+        if self._web_view is not None:
+            self._web_view.stop_loading()
+        if show_empty:
+            self._stack.set_visible_child_name("empty")
+
+    def close(self) -> None:
+        self._closed = True
+        self.invalidate()
+        if self._web_view is not None:
+            self._web_view.stop_loading()
+
     def load_document(
         self,
         path: Path,
@@ -108,10 +130,19 @@ class DocumentView(Gtk.Box):
         on_loaded: Callable[[RenderedDocument], None],
         on_error: Callable[[Exception], None],
     ) -> None:
+        if self._closed:
+            return
         self._load_generation += 1
         generation = self._load_generation
+        self._presented_generation = 0
+        self._presented_token = ""
+        self._notified_generation = 0
         self._document_path = path
-        self._zoom = max(75, min(200, zoom))
+        if self._web_view is not None:
+            self._web_view.stop_loading()
+        zoom_snapshot = max(75, min(200, zoom))
+        theme_snapshot = self._theme
+        self._zoom = zoom_snapshot
         self._stack.set_visible_child_name("loading")
 
         def worker() -> None:
@@ -121,8 +152,8 @@ class DocumentView(Gtk.Box):
                 rendered = self._renderer.render(
                     source,
                     title=path.name,
-                    zoom=self._zoom,
-                    theme=self._theme,
+                    zoom=zoom_snapshot,
+                    theme=theme_snapshot,
                     document_path=path,
                     workspace_root=workspace_root,
                 )
@@ -158,8 +189,12 @@ class DocumentView(Gtk.Box):
             1000,
         )
 
-    def scroll_to_heading(self, slug: str) -> None:
-        self._evaluate(f"window.mdReader?.scrollToHeading({json.dumps(slug)});")
+    def scroll_to_heading(self, slug: str, *, smooth: bool = True) -> None:
+        behavior = "smooth" if smooth else "auto"
+        self._evaluate(
+            f"window.mdReader?.scrollToHeading({json.dumps(slug)}, "
+            f"{json.dumps(behavior)});"
+        )
 
     def scroll_to_source(self, line: int) -> None:
         self._evaluate(f"window.mdReader?.scrollToSource({int(line)});")
@@ -170,8 +205,17 @@ class DocumentView(Gtk.Box):
             "{ctrlKey:true,deltaY:-100,clientY:240,cancelable:true}));"
         )
 
+    def click_link_for_test(self, href: str) -> None:
+        selector = json.dumps(f'a[href="{href}"]')
+        self._evaluate(
+            f"const link=document.querySelector({selector});"
+            "if(link){link.click();}"
+        )
+
     def _create_web_view(self) -> None:
         manager = WebKit.UserContentManager()
+        manager.register_script_message_handler("ready", None)
+        manager.connect("script-message-received::ready", self._on_ready_message)
         manager.register_script_message_handler("selection", None)
         manager.connect("script-message-received::selection", self._on_selection_message)
         manager.register_script_message_handler("outline", None)
@@ -191,13 +235,44 @@ class DocumentView(Gtk.Box):
             WebKit.HardwareAccelerationPolicy.NEVER
         )
         self._web_view.connect("decide-policy", self._on_decide_policy)
-        self._web_view.connect("load-changed", self._on_load_changed)
+        if os.environ.get("MDREADER_TEST_SELECTION_SCROLL") == "1":
+            self._web_view.connect("notify::title", self._on_test_title_changed)
         self._stack.add_named(self._web_view, "reader")
 
-    def _on_load_changed(self, _view: object, event: object) -> None:
-        if event != WebKit.LoadEvent.FINISHED:
+    def _on_ready_message(self, _manager: object, message: object) -> None:
+        try:
+            payload = self._message_payload(message)
+        except (TypeError, ValueError, json.JSONDecodeError, AttributeError):
             return
+        if (
+            self._closed
+            or payload.get("documentToken") != self._presented_token
+            or self._presented_generation != self._load_generation
+            or self._notified_generation == self._load_generation
+        ):
+            return
+        self._notified_generation = self._load_generation
         self.emit("document-presented")
+        if os.environ.pop("MDREADER_TEST_SELECTION_SCROLL", "") == "1":
+            self._evaluate(
+                "const main=document.querySelector('main');"
+                "if(main){const original=Array.from(main.children);"
+                "for(let i=0;i<8;i+=1){original.forEach((node)=>"
+                "main.appendChild(node.cloneNode(true)));}}"
+                "window.scrollTo(0,Math.min(700,"
+                "document.documentElement.scrollHeight-window.innerHeight));"
+                "window.dispatchEvent(new WheelEvent('wheel',"
+                "{deltaY:100,clientY:240,cancelable:true}));"
+                "window.requestAnimationFrame(()=>{"
+                "window.dispatchEvent(new Event('pointerdown',{bubbles:true}));"
+                "const node=document.querySelector('p');"
+                "if(node){const r=document.createRange();r.selectNodeContents(node);"
+                "const s=window.getSelection();s.removeAllRanges();s.addRange(r);}"
+                "const start=window.scrollY;window.setTimeout(()=>{"
+                "const drift=Math.abs(window.scrollY-start);"
+                "document.title='MDREADER_SELECTION_DRIFT:'+drift.toFixed(2);"
+                "},220);});"
+            )
         if os.environ.get("MDREADER_TEST_SELECT_FIRST") != "1":
             return
         self._evaluate(
@@ -206,6 +281,21 @@ class DocumentView(Gtk.Box):
             "const s=window.getSelection();s.removeAllRanges();s.addRange(r);}"
         )
 
+
+    def _on_test_title_changed(self, view: object, _parameter: object) -> None:
+        title = view.get_title() or ""
+        prefix = "MDREADER_SELECTION_DRIFT:"
+        if not title.startswith(prefix):
+            return
+        try:
+            drift = float(title.removeprefix(prefix))
+        except ValueError:
+            return
+        if drift <= 1.0:
+            print(f"MDREADER_TEST_SELECTION_SCROLL_OK={drift:.2f}", flush=True)
+        else:
+            print(f"MDREADER_TEST_SELECTION_SCROLL_FAIL={drift:.2f}", flush=True)
+
     def _finish_load(
         self,
         generation: int,
@@ -213,13 +303,24 @@ class DocumentView(Gtk.Box):
         rendered: RenderedDocument,
         on_loaded: Callable[[RenderedDocument], None],
     ) -> bool:
-        if generation != self._load_generation:
+        if self._closed or generation != self._load_generation:
             return GLib.SOURCE_REMOVE
         if self._web_view is None:
             self._stack.set_visible_child_name("unavailable")
         else:
-            base_uri = path.parent.as_uri().rstrip("/") + "/"
-            self._web_view.load_html(rendered.html, base_uri)
+            token = f"document-{generation}"
+            html = rendered.html.replace(
+                "<html ",
+                f'<html data-mdreader-token="{token}" ',
+                1,
+            )
+            self._presented_generation = generation
+            self._presented_token = token
+            # A document URI keeps `#fragment` links anchored to the current
+            # Markdown file while relative assets still resolve from its
+            # parent directory under normal URL resolution rules.
+            base_uri = path.as_uri()
+            self._web_view.load_html(html, base_uri)
             self._stack.set_visible_child_name("reader")
         on_loaded(rendered)
         return GLib.SOURCE_REMOVE
@@ -230,24 +331,33 @@ class DocumentView(Gtk.Box):
         error: Exception,
         on_error: Callable[[Exception], None],
     ) -> bool:
-        if generation != self._load_generation:
+        if self._closed or generation != self._load_generation:
             return GLib.SOURCE_REMOVE
         self._error.set_description(str(error))
         self._stack.set_visible_child_name("error")
         on_error(error)
         return GLib.SOURCE_REMOVE
 
+    @staticmethod
+    def _message_payload(message: object) -> dict[str, object]:
+        value = message.get_js_value() if hasattr(message, "get_js_value") else message
+        if hasattr(value, "is_string") and value.is_string():
+            raw = value.to_string()
+        else:
+            raw = value.to_json(0) if hasattr(value, "to_json") else str(value)
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise TypeError("WebKit message payload must be an object")
+        return payload
+
     def _on_selection_message(self, _manager: object, message: object) -> None:
         try:
-            value = message.get_js_value() if hasattr(message, "get_js_value") else message
-            if hasattr(value, "is_string") and value.is_string():
-                raw = value.to_string()
-            else:
-                raw = value.to_json(0) if hasattr(value, "to_json") else str(value)
-            payload = json.loads(raw)
-            if not isinstance(payload, dict):
+            payload = self._message_payload(message)
+            if payload.get("documentToken") != self._presented_token:
                 return
             heading = payload.get("heading") or {}
+            if not isinstance(heading, dict):
+                heading = {}
             selection = DocumentSelection(
                 text=str(payload.get("text", ""))[:12000],
                 start_line=max(0, int(payload.get("startLine", 0))),
@@ -261,13 +371,10 @@ class DocumentView(Gtk.Box):
 
     def _on_outline_message(self, _manager: object, message: object) -> None:
         try:
-            value = message.get_js_value() if hasattr(message, "get_js_value") else message
-            if hasattr(value, "is_string") and value.is_string():
-                raw = value.to_string()
-            else:
-                raw = value.to_json(0) if hasattr(value, "to_json") else str(value)
-            payload = json.loads(raw)
-            heading_id = payload.get("id", "") if isinstance(payload, dict) else ""
+            payload = self._message_payload(message)
+            if payload.get("documentToken") != self._presented_token:
+                return
+            heading_id = payload.get("id", "")
             if not isinstance(heading_id, str) or len(heading_id) > 512:
                 return
         except (TypeError, ValueError, json.JSONDecodeError, AttributeError):
@@ -276,13 +383,8 @@ class DocumentView(Gtk.Box):
 
     def _on_zoom_message(self, _manager: object, message: object) -> None:
         try:
-            value = message.get_js_value() if hasattr(message, "get_js_value") else message
-            if hasattr(value, "is_string") and value.is_string():
-                raw = value.to_string()
-            else:
-                raw = value.to_json(0) if hasattr(value, "to_json") else str(value)
-            payload = json.loads(raw)
-            if not isinstance(payload, dict):
+            payload = self._message_payload(message)
+            if payload.get("documentToken") != self._presented_token:
                 return
             percent = max(75, min(200, int(payload.get("percent", 100))))
             anchor_y = float(payload.get("anchorY", 0))
@@ -295,24 +397,28 @@ class DocumentView(Gtk.Box):
         self.emit("zoom-requested", percent, anchor_y)
 
     def _on_decide_policy(self, _view: object, decision: object, decision_type: object) -> bool:
-        if decision_type != WebKit.PolicyDecisionType.NAVIGATION_ACTION:
+        if self._closed or decision_type != WebKit.PolicyDecisionType.NAVIGATION_ACTION:
             return False
-        request = decision.get_navigation_action().get_request()
-        uri = request.get_uri()
-        if uri.startswith(("http://", "https://", "mailto:")):
+        action = decision.get_navigation_action()
+        if action.get_navigation_type() != WebKit.NavigationType.LINK_CLICKED:
+            return False
+        uri = action.get_request().get_uri()
+        parsed = urlsplit(uri)
+        scheme = parsed.scheme.lower()
+        if scheme in {"http", "https", "mailto"}:
             decision.ignore()
             launcher = Gtk.UriLauncher.new(uri)
             launcher.launch(self.get_root(), None, None, None)
             return True
-        if uri.startswith("file:") and uri.partition("#")[0].lower().endswith(
-            (".md", ".markdown", ".mdown", ".mkd")
-        ):
+        if scheme == "file":
             decision.ignore()
-            self.emit("open-local-document", uri.partition("#")[0])
+            if parsed.path.lower().endswith((".md", ".markdown", ".mdown", ".mkd")):
+                self.emit("open-local-document", uri)
             return True
-        return False
+        decision.ignore()
+        return True
 
     def _evaluate(self, script: str) -> None:
-        if self._web_view is None:
+        if self._closed or self._web_view is None:
             return
         self._web_view.evaluate_javascript(script, -1, None, None, None, None, None)

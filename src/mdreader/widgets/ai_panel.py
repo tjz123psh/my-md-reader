@@ -4,6 +4,7 @@ import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import gi
 
@@ -233,6 +234,38 @@ class AiPanel(Gtk.Box):
         self._update_context_summary()
         self._update_composer()
 
+    def reset_conversation(self, description: str = "询问当前章节，或选择文字以提供精确上下文") -> None:
+        self._cancel_render_timeout()
+        if self._scroll_source_id:
+            GLib.source_remove(self._scroll_source_id)
+            self._scroll_source_id = 0
+        self._assistant_body = None
+        self._assistant_content = None
+        self._thinking_row = None
+        self._assistant_text = ""
+        self._last_rendered_text = ""
+        self._assistant_history.clear()
+        self._clear_box(self._transcript)
+        self._status.set_icon_name(
+            "chat-symbolic" if self._available else "network-offline-symbolic"
+        )
+        self._status.set_title(
+            "讨论当前文档" if self._available else "OpenCode 不可用"
+        )
+        self._status.set_description(
+            description
+            if self._available
+            else "请安装并配置 OpenCode；文档阅读功能仍可正常使用"
+        )
+        self._transcript.append(self._status)
+        self._set_running(False)
+
+    def close(self) -> None:
+        self._cancel_render_timeout()
+        if self._scroll_source_id:
+            GLib.source_remove(self._scroll_source_id)
+            self._scroll_source_id = 0
+
     def set_model_options(self, models: tuple[str, ...], current_model: str) -> None:
         self._models = models
         self._model_menu.remove_all()
@@ -252,17 +285,7 @@ class AiPanel(Gtk.Box):
         self._model_label.set_tooltip_text(model)
         if not new_conversation:
             return
-        self._assistant_body = None
-        self._assistant_content = None
-        self._thinking_row = None
-        self._assistant_text = ""
-        self._last_rendered_text = ""
-        self._assistant_history.clear()
-        self._clear_box(self._transcript)
-        self._status.set_icon_name("chat-symbolic")
-        self._status.set_title(f"正在使用 {label}")
-        self._status.set_description("使用此模型开始新对话")
-        self._transcript.append(self._status)
+        self.reset_conversation(f"正在使用 {label}，使用此模型开始新对话")
 
     def set_selection(self, selection: DocumentSelection) -> None:
         self._selection = selection
@@ -540,6 +563,8 @@ class AiPanel(Gtk.Box):
         return label
 
     def _on_markdown_link(self, _label: Gtk.Label, uri: str) -> bool:
+        if urlsplit(uri).scheme.lower() not in {"http", "https", "mailto"}:
+            return True
         launcher = Gtk.UriLauncher.new(uri)
         launcher.launch(self.get_root(), None, None, None)
         return True
