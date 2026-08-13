@@ -115,12 +115,8 @@ AiPanel → window coordinator → ContextBuilder + ConversationState
                            └─→ PatchService → diff approval → atomic write
 ```
 
-The target transport is a direct OpenAI-compatible HTTP gateway over libsoup 3
-that replaces the legacy OpenCode subprocess. The migration is in progress;
-until it lands, the current code still runs `opencode run --format json` as an
-asynchronous subprocess, but the architecture described here is the binding
-contract for the migration.
-
+The transport is a direct OpenAI-compatible HTTP gateway over libsoup 3 that
+replaced the legacy OpenCode subprocess (migration complete, commit 222501b).
 Connection is configured in-app: an API base URL, an auth mode and an API key.
 The key is stored in the Secret Service and never persists in GSettings, plain
 files, logs, command lines, screenshots or test snapshots; it is only attached
@@ -242,9 +238,9 @@ src/mdreader/
     └── reader/             HTML template, CSS and selection JS
 ```
 
-The tree above is the direct-LLM target layout (migration in progress). The
-legacy `services/opencode.py` and `tests/test_opencode.py` are removed once
-the gateway lands; no new code extends them. Network, parsing and secret
+The tree above is the current direct-LLM layout (migration complete). The
+legacy `services/opencode.py` and `tests/test_opencode.py` were removed when
+the gateway landed; no new code extends them. Network, parsing and secret
 responsibilities stay in separate services and must not be collapsed into
 `window.py` or `ai_panel.py`.
 

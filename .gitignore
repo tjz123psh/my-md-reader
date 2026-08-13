@@ -10,7 +10,4 @@ htmlcov/
 gschemas.compiled
 # Local agent configuration and private project handoff material.
 AGENTS.md
-.opencode/
 .ai/
-docs/SESSION_PROMPT.md
-docs/IMPLEMENTATION_PLAN.md

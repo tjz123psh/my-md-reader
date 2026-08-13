@@ -1,12 +1,13 @@
 # MD Reader 直接 LLM 接入迁移执行规范
 
-> 文档状态：待执行的目标方案，不代表当前代码已经完成迁移
+> 文档状态：✅ **迁移已完成**（2026-08-13，commit `222501b`，已推送 GitHub main）。
+> 本文件保留为决策记录与验收门槛；第 2 章的"当前状态"描述的是迁移前基线。
 >
 > 制定日期：2026-08-12
 >
 > 适用仓库：MD Reader
 >
-> 执行对象：后续接手本项目的编码模型或开发者
+> 执行对象：迁移的执行记录；后续改动以实际代码与架构文档为准
 
 ## 0. 文档权威性与使用方式
 
@@ -17,12 +18,11 @@
 执行者必须先完整阅读：
 
 1. `AGENTS.md`
-2. `docs/SESSION_PROMPT.md`
+2. `.ai/WORKING.md`（实时状态，gitignore 本地文件）
 3. `docs/ARCHITECTURE.md`
 4. `docs/DESIGN_SPEC.md`
-5. `docs/IMPLEMENTATION_PLAN.md`
-6. **本文件**
-7. `git status --short` 与最新提交
+5. **本文件**
+6. `git status --short` 与最新提交
 
 如果上述文档中的 OpenCode 设计与本文件冲突：
 
@@ -95,7 +95,11 @@ MD Reader 第一版必须保持范围小、行为确定、易测试：
 
 ## 2. 当前状态与迁移差距
 
-当前实现主要集中在：
+> **本节为迁移前基线（历史记录）**：迁移已完成，`services/opencode.py` 与
+> `tests/test_opencode.py` 已删除，目标列（下方"迁移后的主要变化"表格的
+> 右侧）即当前实现。
+
+当前实现（迁移前）主要集中在：
 
 - `src/mdreader/services/opencode.py`
 - `src/mdreader/window.py`
@@ -989,7 +993,7 @@ API Key 只在此次请求生命周期内持有。完成或取消后，draft 仍
 每阶段完成后必须：
 
 - 运行该阶段目标测试；
-- 更新 `docs/IMPLEMENTATION_PLAN.md` checkbox 和 handoff；
+- 更新 `.ai/WORKING.md` 阶段状态（实时状态文件，gitignore 本地）；
 - 记录实际验证与未验证项；
 - 保持工作树可审查；
 - 不跨阶段隐藏红测。
@@ -1421,7 +1425,7 @@ meson setup builddir
 
 ## 17. 执行者交接模板
 
-每个阶段结束后在 `docs/IMPLEMENTATION_PLAN.md` 追加：
+每个阶段结束后在 `.ai/WORKING.md`（实时状态文件，gitignore 本地）追加：
 
 ```text
 ### YYYY-MM-DD direct LLM migration — Phase N
