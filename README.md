@@ -6,11 +6,11 @@
 
 MD Reader 是一款面向 Linux 的本地只读 Markdown 阅读工作区。它使用 GTK 4、
 libadwaita 和 WebKitGTK 6 构建，提供五套统一阅读主题、文件树、标题大纲，以及能够
-理解当前文件和选区的 OpenCode AI 助手。
+理解当前文件和选区的 AI 问答助手。
 
 应用本身不提供文本编辑器。AI 只能针对用户选中的源码行提出修改，所有变更都
 必须先经过应用生成的 diff 审阅，再由用户明确确认；已应用的修改可以撤销。
-即使没有安装 OpenCode，Markdown 阅读功能也能完整使用。
+即使未配置 AI 或没有网络，Markdown 阅读功能也能完整使用。
 
 ## 核心功能
 
@@ -22,7 +22,7 @@ libadwaita 和 WebKitGTK 6 构建，提供五套统一阅读主题、文件树�
 - 支持工作区内的标准图片路径和 Obsidian `![[图片.png|宽度]]` 附件写法。
 - 提供暖纸、雾蓝、鼠尾草、午夜墨和梅夜五套主题，正文、目录与 AI 面板同步切换。
 - 支持鼠标平滑滚动、触控板原生滚动，以及 75% 到 200% 的源码块指针锚定独立缩放。
-- AI 提供明确的阅读问答和修改提案模式、支持中文输入法的原生提示词输入，并可切换 OpenCode 免费模型。
+- AI 提供明确的阅读问答和修改提案模式、支持中文输入法的原生提示词输入，并可切换用户配置的 OpenAI-compatible 服务提供的模型。
 - AI 回答支持标题、列表、表格、引用、链接和带语法高亮的代码，并显示 Thinking 状态。
 - AI 修改仅限选中的原始行范围，支持 diff 审批、冲突检测、原子写入和撤销。
 - 针对 Niri 的 640、960、1280 和 1920 逻辑像素列宽进行自适应设计。
@@ -58,9 +58,12 @@ sudo pacman -S gtk4 libadwaita webkitgtk-6.0 python-gobject \
   meson ninja blueprint-compiler
 ```
 
-OpenCode 只用于 AI 功能，并不是阅读器的必需依赖。安装并配置 OpenCode 后，
-AI 面板会列出当前可用的免费模型，并且只保存所选模型的 ID。Provider 凭据始终
-由 OpenCode 自己管理，MD Reader 不读取也不存储凭据。
+OpenCode 已不再使用。AI 问答功能需要用户配置一个 OpenAI-compatible 服务，
+并不是阅读器的必需依赖。在连接设置中填写 API 基础地址与 API Key 后，AI 面板
+会列出该服务提供的模型，并且只保存所选模型的 ID。API Key 由系统 Secret
+Service（密钥环）保管，不会写入设置文件或日志。AI 问答还需要 libsoup3 与
+libsecret 的 GI 类型库（Arch 包：libsoup3、libsecret）；缺少时只降级 AI，
+不影响阅读。
 
 ## 构建与运行
 
@@ -96,15 +99,15 @@ meson install -C build-install
 
 ## 安全边界
 
-OpenCode 使用应用注入的 deny-all agent，并在独立的临时目录中运行，不会获得
-工作区路径或文件工具。模型返回的修改只会被解析为提案，不能直接写入文件。
-更完整的实现和安全决策见架构文档。
+发送问题时，MD Reader 会把当前文档的受限摘录、选区、相对路径、行号和你的问题
+发送到用户配置的 AI 服务，不会把完整工作区自动发送给模型。模型返回的修改只会被
+解析为提案，不能直接写入文件。更完整的实现和安全决策见架构文档。
 
 ## 项目文档
 
 - [架构与安全边界](docs/ARCHITECTURE.md)
 - [界面设计规范](docs/DESIGN_SPEC.md)
-- [Flatpak 与 OpenCode 约束](docs/FLATPAK_CONSTRAINTS.md)
+- [Flatpak 网络与 Secret Service 约束](docs/FLATPAK_CONSTRAINTS.md)
 
 ## 许可证
 

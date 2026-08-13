@@ -41,7 +41,6 @@ def run_case(
     launcher: Path,
     fixture: Path,
     *,
-    opencode_missing: bool,
     selection_scroll: bool = False,
 ) -> bool:
     environment = os.environ.copy()
@@ -59,14 +58,8 @@ def run_case(
     else:
         environment["MDREADER_TEST_CTRL_WHEEL"] = "1"
         environment.pop("MDREADER_TEST_SELECTION_SCROLL", None)
-    if opencode_missing:
-        environment["MDREADER_TEST_OPENCODE_MISSING"] = "1"
-    else:
-        environment.pop("MDREADER_TEST_OPENCODE_MISSING", None)
 
-    label = "without OpenCode" if opencode_missing else "with OpenCode"
-    if selection_scroll:
-        label += ", selection-scroll"
+    label = "selection-scroll" if selection_scroll else "default"
     try:
         completed = subprocess.run(
             [str(launcher), str(fixture)],
@@ -135,7 +128,6 @@ def run_restore_case(launcher: Path, root: Path) -> bool:
         {
             "GSETTINGS_BACKEND": "keyfile",
             "XDG_CONFIG_HOME": str(config_home),
-            "MDREADER_TEST_OPENCODE_MISSING": "1",
             "MDREADER_TEST_QUIT_ON_PRESENT": "1",
         }
     )
@@ -332,7 +324,6 @@ def run_watcher_case(launcher: Path, root: Path) -> bool:
     environment.update(
         {
             "GSETTINGS_BACKEND": "memory",
-            "MDREADER_TEST_OPENCODE_MISSING": "1",
             "MDREADER_TEST_WATCHER_ACCEPT": "1",
             "MDREADER_TEST_HEADING": "three",
         }
@@ -457,7 +448,6 @@ def run_fragment_case(
     environment.update(
         {
             "GSETTINGS_BACKEND": "memory",
-            "MDREADER_TEST_OPENCODE_MISSING": "1",
             "MDREADER_TEST_WATCHER_ACCEPT": "1",
             "MDREADER_TEST_FRAGMENT_CLICK": href,
         }
@@ -569,13 +559,9 @@ def main() -> int:
         blocked.mkdir()
         blocked.chmod(0)
         try:
-            if not run_case(
-                launcher, fixture, opencode_missing=True, selection_scroll=True
-            ):
+            if not run_case(launcher, fixture, selection_scroll=True):
                 return 1
-            if not run_case(launcher, fixture, opencode_missing=False):
-                return 1
-            if not run_case(launcher, fixture, opencode_missing=True):
+            if not run_case(launcher, fixture):
                 return 1
             if not run_restore_case(launcher, workspace):
                 return 1

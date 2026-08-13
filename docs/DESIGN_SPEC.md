@@ -164,7 +164,11 @@ Breakpoints are initially 760sp and 1120sp.
 - `Ctrl+Shift+A`: toggle/focus AI panel.
 - `Escape`: close an overlay or clear selection context, depending on focus.
 - Clicking an outline entry scrolls to the heading without reloading.
-- The AI header shows the current model; its menu lists free OpenCode models.
+- The AI header shows the current model's compact name; activating it opens
+  the connection settings and the searchable model selector, so model state
+  lives in one place. The catalog comes from the configured service's `GET
+  /models`; when that endpoint is unavailable the user can type a model ID
+  manually.
 - The AI header close control hides only the assistant; it is not a window
   title button.
 - Ask is a read-only discussion mode. Edit is an explicit selected-line diff
@@ -185,8 +189,105 @@ Breakpoints are initially 760sp and 1120sp.
   Document” action and a secondary “Open Folder” action.
 - Folder with no Markdown: explain that no `.md`/`.markdown` files were found
   and allow choosing another folder.
-- AI unavailable: small status page inside the AI pane; never cover the reader.
+- AI unconfigured: small status page inside the AI pane with a “Configure AI
+  connection” action; never cover the reader. Auth, network and keyring errors
+  keep the reader fully usable, retain the transcript and question, and offer
+  an action that reopens the connection settings.
 - Rendering error: retain the filename, show the precise error and Retry.
+
+## AI connection and model selection
+
+The assistant is configured in-app with an API base URL and an API key. There
+is no dependency on an installed CLI and no free-model listing; the catalog is
+whatever the configured service returns.
+
+### Connection settings dialog
+
+A native preferences dialog, not a web-style card page:
+
+```text
+AI connection settings
+
+[Connection]
+API base URL       https://…/v1
+API Key            ••••••••
+                   Leaving it blank reuses the saved key for the same address;
+                   changing service never reuses the old key
+No auth            [switch; available only for loopback addresses]
+
+[Model]
+Models URL         advanced; defaults to {base}/models
+[Fetch models]
+Current model      model-id            >
+                   or “type a model ID manually”
+
+[Privacy]
+When you send a question, a bounded excerpt of the current document, the
+selection, the relative path and line numbers are sent to the service above.
+
+[Clear connection]              [Cancel] [Save connection]
+```
+
+Rules:
+
+- The key field is a native password entry and is never prefilled; after
+  saving, the key is never shown again.
+- “No auth” must be explicitly chosen and only becomes available once the URL
+  is confirmed loopback; remote URLs force bearer.
+- Icon-only controls carry tooltips and accessible names; loading uses
+  `AdwSpinner`.
+- Save is the only suggested action; Clear connection is destructive-styled
+  with confirmation.
+- Errors appear next to the field they concern; network-level errors use a
+  persistent banner rather than a one-shot toast.
+- Closing the dialog cancels an in-flight model fetch and drops the unsaved
+  key.
+- The dialog must not clip at 640px width, 200% text scaling or high contrast.
+
+### Searchable model selector
+
+The catalog can hold anywhere from 0 to 2000 models, so an unsearchable long
+menu is not acceptable:
+
+- `Gtk.SearchEntry` with `Gtk.FilterListModel` + `Gtk.ListView` (or an
+  equivalent native list).
+- Rows show the full model ID as the primary label and the optional `owned_by`
+  value as a subtitle.
+- Keyboard search, arrow-key movement, Enter selects, Escape backs out. Long
+  IDs may ellipsize but the full value stays in the tooltip and accessible
+  name.
+- A “type a model ID manually” entry is always available, so a service without
+  a working `/models` endpoint still supports manual IDs.
+- The selected model is clearly marked; a saved model missing from a fresh
+  fetch is kept with a “not in this result” hint instead of silently switching.
+- The AI header opens the same selector, so there is exactly one model state.
+
+### AI panel states
+
+Availability is injected by the window coordinator as a typed state; the panel
+never probes for executables or environment variables itself:
+
+```text
+UNCONFIGURED       no service configured; shows the configure action
+READY_NO_DOCUMENT  configured, but no document is open yet
+READY              ready to ask
+FETCHING_MODELS    only inside the settings dialog; never freezes the reader
+RUNNING            streaming a reply; Thinking indicator and stop button
+AUTH_ERROR         key rejected; action reopens connection settings
+NETWORK_ERROR      network/provider failure; transcript and question retained, retry allowed
+SECRET_ERROR       keyring unavailable or saved key missing; action reopens connection settings
+```
+
+### Privacy
+
+The settings page states plainly:
+
+> When you send a question, MD Reader sends a bounded excerpt of the current
+> document, your selection, the relative path and line numbers to the AI
+> service you configured. The app never auto-sends the whole workspace.
+
+No vague “data may be used” wording, and no claim that the third-party service
+will not retain data — retention is decided by the provider the user chose.
 
 ## Self-critique and revision
 
@@ -208,3 +309,11 @@ interaction without competing with long-form text.
 - 200% text scaling remains navigable.
 - Reader selection and AI quote clearly express the same source relationship.
 - Empty AI space does not reduce the reading area at 640/960px.
+- AI connection dialog and searchable model selector fit 640px and 200% text
+  without clipping or losing the primary action.
+- Model list with 2000 entries stays scrollable and searchable without
+  freezing GTK.
+- Auth, network and keyring errors keep reading fully usable; network errors
+  retain the transcript and question.
+- The saved API key is never shown again; editing settings leaves the password
+  field blank.

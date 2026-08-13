@@ -1,7 +1,6 @@
 from .ai_markdown import AiMarkdownBlock, AiMarkdownCell, AiMarkdownRenderer
 from .context import ContextBuilder
 from .markdown import MarkdownRenderer, MarkdownUnavailableError
-from .opencode import OpenCodeError, OpenCodeGateway
 from .patches import PatchError, PatchProposal, PatchService
 from .themes import (
     DEFAULT_THEME_ID,
@@ -36,8 +35,6 @@ __all__ = [
     "LocalDocumentLinkError",
     "MarkdownRenderer",
     "MarkdownUnavailableError",
-    "OpenCodeError",
-    "OpenCodeGateway",
     "PatchError",
     "PatchProposal",
     "PatchService",

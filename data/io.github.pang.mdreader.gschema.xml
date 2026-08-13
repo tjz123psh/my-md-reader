@@ -51,9 +51,18 @@
       <default>360</default>
       <summary>AI 助手侧栏宽度</summary>
     </key>
+    <key name="ai-profile" type="a{ss}">
+      <!-- AI 连接的非秘密元数据，一次 set_value 整体写入（迁移规范 §9.1/§9.3）。
+           允许字段：profile-id、provider-kind、api-base-url、models-url、model-id、auth-mode。
+           API Key 严禁写入此处，只存 Secret Service。 -->
+      <default>{}</default>
+      <summary>AI 连接的非秘密元数据</summary>
+    </key>
     <key name="opencode-model" type="s">
+      <!-- DEPRECATED: OpenCode 运行时已被直接 LLM 接入取代（迁移规范 §9.1）。
+           保留仅用于旧版本升级兼容；新代码不得再写入，也不自动迁移到 ai-profile。 -->
       <default>''</default>
-      <summary>上次选择的 OpenCode 模型标识符</summary>
+      <summary>上次选择的 OpenCode 模型标识符（遗留，已弃用）</summary>
     </key>
   </schema>
 </schemalist>

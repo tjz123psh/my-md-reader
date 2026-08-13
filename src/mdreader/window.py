@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import gi
@@ -11,13 +14,21 @@ gi.require_version("Gio", "2.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from mdreader.models import DocumentSelection, OutlineItem, RenderedDocument
+from mdreader.models import (
+    AiConnectionDraft,
+    AiError,
+    AiErrorCode,
+    AiPanelState,
+    AiProfile,
+    DocumentSelection,
+    OutlineItem,
+    RenderedDocument,
+)
+from mdreader.models.conversation import ChatMessage, ConversationState, commit_ask_if_successful
 from mdreader.services import (
     ContextBuilder,
     DocumentSnapshot,
     LocalDocumentLinkError,
-    OpenCodeError,
-    OpenCodeGateway,
     PatchError,
     PatchService,
     ScanCoordinator,
@@ -30,6 +41,26 @@ from mdreader.services import (
     normalize_theme_id,
     parse_local_document_uri,
 )
+from mdreader.services.ai_endpoints import (
+    build_chat_endpoint,
+    build_models_endpoint,
+    normalize_api_base_url,
+)
+from mdreader.services.ai_http import AiHttpClient
+from mdreader.services.ai_models import fetch_models_catalog
+from mdreader.services.ai_profiles import AiProfileStore
+from mdreader.services.ai_secrets import (
+    InMemorySecretStore,
+    SecretServiceStore,
+    secret_service_name_owned,
+)
+from mdreader.services.llm import (
+    EDIT_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    ChatOutcome,
+    OpenAICompatibleGateway,
+    validate_question,
+)
 from mdreader.services.restore import (
     RestoreRequest,
     make_restore,
@@ -37,7 +68,14 @@ from mdreader.services.restore import (
 )
 from mdreader.services.settings import SettingsStore
 from mdreader.services.patches import PatchProposal
-from mdreader.widgets import AiPanel, DocumentView, LibrarySidebar, SidebarResizeHandle
+from mdreader.widgets import (
+    AiConnectionDialog,
+    AiPanel,
+    DocumentView,
+    LibrarySidebar,
+    SidebarResizeHandle,
+)
+from mdreader.widgets.ai_connection_dialog import error_message
 
 
 @Gtk.Template(resource_path="/io/github/pang/mdreader/ui/window.ui")
@@ -82,14 +120,32 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._pending_edit_text = ""
         self._pending_edit_path: Path | None = None
         self._pending_edit_base_hash = ""
-        self._opencode: OpenCodeGateway | None = None
-        self._selected_model = OpenCodeGateway.normalize_model(
-            settings.get_string("opencode-model")
-        )
-        self._available_models: tuple[str, ...] = ()
-        self._model_load_generation = 0
+        self._selected_model = ""
         self._scan_generation = 0
         self._ai_request_generation = 0
+        self._ai_busy = False
+        self._ai_stream_cancellable: Gio.Cancellable | None = None
+        self._conversation_document: Path | None = None
+        # Direct LLM migration state (Phase 5): profile store, transport,
+        # gateway, bounded conversation and the connection dialog handle.
+        if os.environ.get("MDREADER_TEST_AI_MEMORY_SECRETS") == "1":
+            self._ai_secret_store = InMemorySecretStore()
+        elif secret_service_name_owned():
+            self._ai_secret_store = SecretServiceStore()
+        else:
+            # Runtime fallback (product decision 2026-08-13): a machine with
+            # no keyring daemon must still be able to connect to the AI
+            # service ("能连上 API 即可"). The key then lives for the session
+            # only — in-memory, never persisted; the connection dialog asks
+            # to retype it after a restart. The probe never auto-starts a
+            # provider, so this path does not spawn a daemon.
+            self._ai_secret_store = InMemorySecretStore()
+        self._ai_profiles = AiProfileStore(self._ai_secret_store, settings)
+        self._ai_http = AiHttpClient()
+        self._ai_gateway = OpenAICompatibleGateway(self._ai_http)
+        self._conversation = ConversationState()
+        self._ai_dialog: AiConnectionDialog | None = None
+        self._ai_fetch_cancellable: Gio.Cancellable | None = None
         self._test_source_line = 0
         self._test_ctrl_wheel = False
         self._zoom = settings.get_int("document-zoom")
@@ -135,6 +191,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
             self._document.scroll_to_source,
             self._on_ai_send,
             self._on_ai_cancel,
+            on_configure=self._open_ai_settings,
             current_model=self._selected_model,
             theme=self._theme,
         )
@@ -174,18 +231,35 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._create_search_popover()
         self._setup_actions()
         self._setup_breakpoints()
+        self._update_ai_state()
+        if os.environ.get("MDREADER_TEST_AI_CONFIGURE") == "1":
+            GLib.idle_add(self._open_ai_settings)
+        if os.environ.get("MDREADER_TEST_AI_PRESEED") == "1":
+            self._preseed_ai_profile_for_test()
+        if os.environ.get("MDREADER_TEST_AI_SHOW") == "1":
+            GLib.timeout_add(400, self._show_ai_sidebar_for_test)
+        cancel_ms = os.environ.get("MDREADER_TEST_AI_CANCEL_MS", "").strip()
+        if cancel_ms.isdigit():
+            GLib.timeout_add(int(cancel_ms), self._test_cancel_ai_request)
 
         if initial_path:
             self.open_path(initial_path)
         else:
             self._restore_last_session()
 
+    def _test_cancel_ai_request(self) -> bool:
+        self._on_ai_cancel()
+        return GLib.SOURCE_REMOVE
+
+    def _show_ai_sidebar_for_test(self) -> bool:
+        self._ai_split.set_show_sidebar(True)
+        return GLib.SOURCE_REMOVE
+
     def do_close_request(self) -> bool:
         if self._closed:
             return False
         self._closed = True
         self._scan_generation += 1
-        self._model_load_generation += 1
         self._ai_request_generation += 1
         self._document.invalidate()
         self._document.close()
@@ -194,9 +268,11 @@ class MdReaderWindow(Adw.ApplicationWindow):
         for source_id in self._sidebar_resize_apply_sources.values():
             GLib.source_remove(source_id)
         self._sidebar_resize_apply_sources.clear()
-        if self._opencode is not None:
-            self._opencode.close()
-            self._opencode = None
+        if self._ai_dialog is not None:
+            self._ai_dialog.close()
+        if self._ai_stream_cancellable is not None:
+            self._ai_stream_cancellable.cancel()
+            self._ai_stream_cancellable = None
         if self._watcher is not None:
             self._watcher.close()
             self._watcher = None
@@ -373,6 +449,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
             "zoom-in": lambda *_: self._change_zoom(10),
             "zoom-out": lambda *_: self._change_zoom(-10),
             "zoom-reset": lambda *_: self._set_zoom(100),
+            "ai-settings": self._on_ai_settings_action,
         }
         for name, callback in actions.items():
             action = Gio.SimpleAction.new(name, None)
@@ -392,14 +469,261 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._theme_action.connect("activate", self._on_theme_selected)
         self.add_action(self._theme_action)
 
-        self._model_action = Gio.SimpleAction.new_stateful(
-            "select-model",
-            GLib.VariantType.new("s"),
-            GLib.Variant.new_string(self._selected_model),
+    # -- direct LLM connection state (Phase 5) -------------------------------
+
+    def _on_ai_settings_action(
+        self, _action: Gio.SimpleAction, _parameter: object
+    ) -> None:
+        self._open_ai_settings()
+
+    def _update_ai_state(self, *, reset: bool = False) -> None:
+        """Derive the typed AI panel state from the saved profile (spec §10.4).
+
+        A complete profile (metadata + model) drives READY states; anything
+        incomplete or missing leaves the panel in UNCONFIGURED.
+        """
+        profile = self._ai_profiles.load()
+        has_document = self._current_document_path is not None
+        if profile is not None and profile.model_id:
+            self._ai.set_current_model(profile.model_id)
+            self._ai.set_ai_state(
+                AiPanelState.READY if has_document else AiPanelState.READY_NO_DOCUMENT,
+                reset=reset,
+            )
+            return
+        self._ai.set_ai_state(AiPanelState.UNCONFIGURED, reset=reset)
+
+    def _preseed_ai_profile_for_test(self) -> None:
+        """Process-level smoke hook: save a profile directly (in-memory secret
+        store only) so the Ask/Edit send path can be exercised end-to-end
+        against a local stub server without opening the dialog."""
+        if not isinstance(self._ai_secret_store, InMemorySecretStore):
+            return
+        base = os.environ.get("MDREADER_TEST_AI_BASE_URL", "")
+        key = os.environ.get("MDREADER_TEST_AI_KEY", "")
+        model = os.environ.get("MDREADER_TEST_AI_MODEL", "")
+        if not base or not model:
+            return
+        try:
+            self._ai_profiles.save(
+                AiConnectionDraft(
+                    api_base_url=base,
+                    api_key=key,
+                    model_id=model,
+                )
+            )
+        except AiError:
+            return
+
+    def _open_ai_settings(self) -> None:
+        if self._ai_busy:
+            self._show_toast("回答进行中，请稍后再打开连接设置")
+            return
+        if self._ai_dialog is not None:
+            self._ai_dialog.present(self)
+            return
+        profile = self._ai_profiles.load()
+        window = self
+
+        class DialogCallbacks:
+            def on_fetch_models(self, draft: AiConnectionDraft) -> None:
+                window._on_dialog_fetch_models(draft)
+
+            def on_save(self, draft: AiConnectionDraft) -> None:
+                window._on_dialog_save(draft)
+
+            def on_clear(self) -> None:
+                window._on_dialog_clear()
+
+            def on_close(self) -> None:
+                window._ai_dialog = None
+                if window._ai_fetch_cancellable is not None:
+                    window._ai_fetch_cancellable.cancel()
+                    window._ai_fetch_cancellable = None
+
+        dialog = AiConnectionDialog(
+            profile=profile,
+            callbacks=DialogCallbacks(),
+            theme_class=self._theme.css_class,
         )
-        self._model_action.connect("activate", self._on_model_selected)
-        self._model_action.set_enabled(False)
-        self.add_action(self._model_action)
+        self._ai_dialog = dialog
+        dialog.present(self)
+
+    def _on_dialog_fetch_models(self, draft: AiConnectionDraft) -> None:
+        dialog = self._ai_dialog
+        if dialog is None:
+            return
+        generation = getattr(dialog, "generation", 0)
+        if self._ai_fetch_cancellable is not None:
+            self._ai_fetch_cancellable.cancel()
+        cancellable = Gio.Cancellable()
+        self._ai_fetch_cancellable = cancellable
+
+        authorization = None
+        if draft.auth_mode == "bearer":
+            if draft.api_key:
+                authorization = f"Bearer {draft.api_key}"
+            else:
+                # Blank key: resolve the saved secret off the main thread.
+                profile = self._ai_profiles.load()
+
+                def resolve_and_fetch() -> None:
+                    key = ""
+                    if profile is not None:
+                        try:
+                            key = self._ai_secret_store.lookup(profile.profile_id)
+                        except AiError:
+                            key = ""
+                    auth = f"Bearer {key}" if key else None
+                    self._launch_models_fetch(dialog, draft, generation, auth, cancellable)
+
+                self._run_off_main_thread(resolve_and_fetch, lambda _r: None)
+                return
+        self._launch_models_fetch(dialog, draft, generation, authorization, cancellable)
+
+    def _launch_models_fetch(
+        self,
+        dialog: AiConnectionDialog,
+        draft: AiConnectionDraft,
+        generation: int,
+        authorization: str | None,
+        cancellable: Gio.Cancellable,
+    ) -> None:
+        if self._ai_dialog is not dialog or self._closed:
+            return
+        try:
+            base = normalize_api_base_url(draft.api_base_url)
+            endpoint = build_models_endpoint(base, draft.models_url)
+        except AiError as exc:
+            dialog.set_fetch_result(None, exc, generation=generation)
+            return
+
+        def on_result(result) -> None:
+            if self._ai_dialog is dialog and not self._closed:
+                dialog.set_fetch_result(result, None, generation=generation)
+
+        def on_error(error: AiError) -> None:
+            if self._ai_dialog is dialog and not self._closed:
+                dialog.set_fetch_result(None, error, generation=generation)
+
+        fetch_models_catalog(
+            self._ai_http,
+            endpoint_url=endpoint,
+            authorization=authorization,
+            secret=draft.api_key,
+            cancellable=cancellable,
+            on_result=on_result,
+            on_error=on_error,
+        )
+
+    def _on_dialog_save(self, draft: AiConnectionDraft) -> None:
+        dialog = self._ai_dialog
+        if dialog is None:
+            return
+        profiles = self._ai_profiles
+
+        def work() -> tuple[str, object]:
+            try:
+                profile = profiles.save(draft)
+                return ("ok", (profile, tuple(profiles.cleanup_warnings)))
+            except AiError as exc:
+                return ("error", exc)
+
+        def on_main(result: tuple[str, object]) -> None:
+            if self._closed:
+                return
+            kind, payload = result
+            if kind == "ok":
+                profile, warnings = payload  # type: ignore[misc]
+                if self._ai_dialog is dialog:
+                    dialog.set_save_result(True, None, cleanup_warnings=warnings)
+                # Apply the linkage even when the dialog was closed while the
+                # save was in flight (swarm audit F2): the config is already
+                # persisted, so the panel/model/toast must follow or the
+                # window state lies about the saved connection.
+                self._after_ai_saved(profile, warnings)  # type: ignore[arg-type]
+            else:
+                if self._ai_dialog is dialog:
+                    dialog.set_save_result(False, payload)  # type: ignore[arg-type]
+
+        self._run_off_main_thread(work, on_main)
+
+    def _after_ai_saved(self, profile: AiProfile, warnings: tuple[str, ...]) -> None:
+        # Replacing the configuration cancels any active request so a stale
+        # response can never write into the new conversation (spec §8.6/§18).
+        self._cancel_ai_stream(mark_stopped=True)
+        old_model = self._selected_model
+        self._selected_model = profile.model_id
+        self._conversation.reset()
+        self._update_ai_state(reset=True)
+        if profile.model_id:
+            self._show_toast("AI 连接已保存")
+        else:
+            # Saving without a model leaves the panel unconfigured; the old
+            # "AI 连接已保存" toast made users think they were done (swarm
+            # audit H2).
+            self._show_toast("连接已保存，请再选择模型")
+        if warnings:
+            self._show_toast("新连接已保存，但旧密钥清理失败")
+        if old_model and profile.model_id and old_model != profile.model_id:
+            self._show_toast("已切换模型，将开始新对话")
+        if os.environ.get("MDREADER_TEST_AI_AUTOFILL") == "1":
+            print("MDREADER_TEST_AI_SAVED=1", flush=True)
+
+    def _on_dialog_clear(self) -> None:
+        dialog = self._ai_dialog
+        if dialog is None:
+            return
+        profiles = self._ai_profiles
+
+        def work() -> object:
+            try:
+                profiles.clear()
+                return None
+            except AiError as exc:
+                return exc
+
+        def on_main(result: object) -> None:
+            if self._closed:
+                return
+            if result is None:
+                # Clearing the connection cancels any active request so a
+                # stale response can never commit into the cleared session.
+                self._cancel_ai_stream(mark_stopped=True)
+                if self._ai_dialog is dialog:
+                    dialog.set_clear_result(True, None)
+                self._conversation.reset()
+                self._ai.set_current_model("")
+                self._update_ai_state(reset=True)
+                self._show_toast("已清除 AI 连接")
+            elif self._ai_dialog is dialog:
+                dialog.set_clear_result(False, result)  # type: ignore[arg-type]
+
+        self._run_off_main_thread(work, on_main)
+
+    def _run_off_main_thread(
+        self,
+        work: Callable[[], object],
+        on_main: Callable[[object], None],
+    ) -> None:
+        """Run a blocking service call on a worker thread and return to GTK."""
+
+        def run() -> None:
+            try:
+                result = work()
+            except AiError:
+                result = ("error", sys.exc_info()[1])
+            except Exception as exc:
+                # A non-AiError escaping a worker must never strand the UI
+                # (swarm audit F4: the idle callback was skipped and the
+                # busy state stuck forever).
+                result = (
+                    "error",
+                    AiError(AiErrorCode.NETWORK_FAILED, f"后台任务失败: {exc}"),
+                )
+            GLib.idle_add(on_main, result)
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _make_resizable_sidebar(
         self, child: Gtk.Widget, edge: str, name: str
@@ -781,9 +1105,6 @@ class MdReaderWindow(Adw.ApplicationWindow):
             return
         previous_root = self._workspace.root if self._workspace is not None else None
         changing_workspace = previous_root != workspace.root
-        if changing_workspace and self._opencode is not None:
-            self._opencode.close()
-            self._opencode = None
         if changing_workspace:
             self._cancel_ai_request(reset_conversation=True)
             self._watcher_unavailable_reported = False
@@ -791,22 +1112,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
         if changing_workspace or self._patches is None:
             self._patches = PatchService(workspace.root)
             self._undo_action.set_enabled(False)
-        if self._opencode is None:
-            if os.environ.get("MDREADER_TEST_OPENCODE_MISSING") != "1":
-                try:
-                    self._opencode = OpenCodeGateway(
-                        workspace.root,
-                        model=self._selected_model,
-                    )
-                except OpenCodeError:
-                    self._opencode = None
-        if self._opencode is None:
-            self._model_action.set_enabled(False)
-            self._ai.set_model_options((), self._selected_model)
-        elif self._available_models:
-            self._apply_model_options(self._opencode, self._available_models)
-        else:
-            self._load_model_options(self._opencode)
+        self._update_ai_state()
 
         if self._watcher is not None and (changing_workspace or install_watcher):
             self._watcher.close()
@@ -913,121 +1219,6 @@ class MdReaderWindow(Adw.ApplicationWindow):
         if ScanCoordinator(previous_watcher, previous_serial).should_schedule_followup():
             GLib.idle_add(self._on_workspace_changed)
         return GLib.SOURCE_REMOVE
-
-    def _load_model_options(self, gateway: OpenCodeGateway) -> None:
-        self._model_load_generation += 1
-        generation = self._model_load_generation
-        self._model_action.set_enabled(False)
-
-        def worker() -> None:
-            try:
-                models = gateway.available_models()
-            except OpenCodeError as error:
-                GLib.idle_add(
-                    self._finish_model_options_error,
-                    generation,
-                    gateway,
-                    error,
-                )
-                return
-            GLib.idle_add(
-                self._finish_model_options,
-                generation,
-                gateway,
-                models,
-            )
-
-        threading.Thread(
-            target=worker,
-            name="mdreader-opencode-models",
-            daemon=True,
-        ).start()
-
-    def _finish_model_options(
-        self,
-        generation: int,
-        gateway: OpenCodeGateway,
-        models: tuple[str, ...],
-    ) -> bool:
-        if (
-            self._closed
-            or generation != self._model_load_generation
-            or gateway is not self._opencode
-        ):
-            return GLib.SOURCE_REMOVE
-        self._available_models = models
-        self._apply_model_options(gateway, models)
-        if os.environ.pop("MDREADER_TEST_MODEL_MENU", "") == "1":
-            self._ai_split.set_show_sidebar(True)
-            GLib.timeout_add(250, self._popup_model_menu_smoke)
-        return GLib.SOURCE_REMOVE
-
-    def _popup_model_menu_smoke(self) -> bool:
-        if self._closed:
-            return GLib.SOURCE_REMOVE
-        if not self.is_active():
-            return GLib.SOURCE_CONTINUE
-        self._ai.popup_model_menu()
-        return GLib.SOURCE_REMOVE
-
-    def _finish_model_options_error(
-        self,
-        generation: int,
-        gateway: OpenCodeGateway,
-        _error: OpenCodeError,
-    ) -> bool:
-        if (
-            self._closed
-            or generation != self._model_load_generation
-            or gateway is not self._opencode
-        ):
-            return GLib.SOURCE_REMOVE
-        self._model_action.set_enabled(False)
-        self._ai.set_model_options((), gateway.model)
-        return GLib.SOURCE_REMOVE
-
-    def _apply_model_options(
-        self,
-        gateway: OpenCodeGateway,
-        models: tuple[str, ...],
-    ) -> None:
-        selected = self._selected_model
-        if selected not in models:
-            selected = (
-                OpenCodeGateway.DEFAULT_MODEL
-                if OpenCodeGateway.DEFAULT_MODEL in models
-                else models[0]
-            )
-            gateway.set_model(selected)
-            self._selected_model = selected
-            self._settings.set_string("opencode-model", selected)
-        self._model_action.set_state(GLib.Variant.new_string(selected))
-        self._model_action.set_enabled(True)
-        self._ai.set_model_options(models, selected)
-
-    def _on_model_selected(
-        self,
-        action: Gio.SimpleAction,
-        parameter: GLib.Variant | None,
-    ) -> None:
-        if parameter is None or self._opencode is None:
-            return
-        model = parameter.get_string()
-        if model not in self._available_models:
-            self._show_toast("此 OpenCode 模型已不可用")
-            return
-        if model == self._selected_model:
-            action.set_state(parameter)
-            return
-        try:
-            self._opencode.set_model(model)
-        except OpenCodeError as error:
-            self._show_toast(str(error))
-            return
-        self._selected_model = model
-        self._settings.set_string("opencode-model", model)
-        action.set_state(parameter)
-        self._ai.set_current_model(model, new_conversation=True)
 
     def _on_workspace_changed(self) -> None:
         if self._workspace is None or self._closed:
@@ -1191,6 +1382,13 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._settings.set_string("last-document", str(document.relative_path))
         self.title_label.set_label(document_path.name)
         self._ai.set_document(document.relative_path)
+        # A document switch resets the in-memory Ask history (spec §8.3).
+        conversation_changed = False
+        if self._conversation_document != document.relative_path:
+            self._conversation_document = document.relative_path
+            self._conversation.reset()
+            conversation_changed = True
+        self._update_ai_state()
         if not reload_document:
             # Metadata-only update: the content is already current, so any
             # in-flight reload keeps its restore while no new one is needed.
@@ -1211,7 +1409,18 @@ class MdReaderWindow(Adw.ApplicationWindow):
             and self._pending_fragment[0] != document.relative_path
         ):
             self._pending_fragment = None
-        self._cancel_ai_request(reset_conversation=True)
+        if conversation_changed:
+            # A real document switch cancels the in-flight answer and wipes
+            # the Ask history (spec §8.3/§8.6).
+            self._cancel_ai_request(reset_conversation=True)
+        else:
+            # Same-document reload (re-click or watcher): the content changed
+            # so an in-flight answer's context is stale and must be
+            # cancelled, but the conversation history is still about this
+            # document and must survive (swarm audit F1: the old code
+            # cancelled + wiped history on every reload, even for a re-click
+            # of the already-open document).
+            self._cancel_ai_stream(mark_stopped=True)
         self._current_source = None
         self._selection = DocumentSelection()
         self._ai.set_selection(self._selection)
@@ -1253,6 +1462,7 @@ class MdReaderWindow(Adw.ApplicationWindow):
         self._library.set_outline(())
         self._ai.set_document(None)
         self._ai.set_selection(self._selection)
+        self._update_ai_state()
         self.ai_button.remove_css_class("accent")
         self._document.invalidate(show_empty=True)
         if self._workspace is None:
@@ -1454,7 +1664,6 @@ pacstrap -K /mnt base linux linux-firmware
     def _on_ai_send(self, question: str, edit_mode: bool = False) -> None:
         if (
             self._workspace is None
-            or self._opencode is None
             or self._current_document_path is None
             or self._current_relative_path is None
         ):
@@ -1466,110 +1675,213 @@ pacstrap -K /mnt base linux linux-firmware
         if edit_mode and self._selection.is_empty:
             self._ai.show_error("请先选择需要修改的文档行")
             return
+        if self._ai_busy:
+            return
+        # The 8000-character cap applies to the user's question, not to the
+        # context envelope (spec §6.1); the envelope is bounded by the
+        # 128 KiB serialized request cap in build_chat_request.
         try:
-            gateway = self._opencode
-            self._ai_request_generation += 1
-            request_generation = self._ai_request_generation
-            context = self._context_builder.from_source(
-                self._current_source,
-                self._current_relative_path,
-                self._selection,
-            )
-            effective_question = (
-                "EDIT REQUEST: Replace exactly the selected source lines according to this request: "
-                + question
-                if edit_mode
-                else question
-            )
-            prompt = self._context_builder.prompt(effective_question, context)
-            self._pending_edit = edit_mode
-            self._pending_edit_selection = self._selection
-            self._pending_edit_text = ""
-            self._pending_edit_path = self._current_document_path if edit_mode else None
-            self._pending_edit_base_hash = context.source_hash if edit_mode else ""
-            self._ai.append_user(question)
-            self._ai.begin_assistant(edit_mode=edit_mode)
-            gateway.send(
-                prompt,
-                on_text=lambda text: self._on_ai_text(
-                    request_generation,
-                    gateway,
-                    text,
-                ),
-                on_done=lambda event: self._on_ai_done(
-                    request_generation,
-                    gateway,
-                    event,
-                ),
-                on_error=lambda error: self._on_ai_error(
-                    request_generation,
-                    gateway,
-                    error,
-                ),
-            )
-        except (OSError, OpenCodeError) as error:
-            self._clear_pending_edit()
-            self._ai.show_error(str(error))
+            validate_question(question)
+        except AiError as exc:
+            self._ai.show_error(str(exc))
+            return
+        profile = self._ai_profiles.load()
+        if profile is None or not profile.model_id:
+            self._ai.show_error("尚未配置 AI 连接，请先打开 AI 连接设置")
+            return
+        try:
+            base = normalize_api_base_url(profile.api_base_url)
+            endpoint = build_chat_endpoint(base)
+        except AiError:
+            self._ai.show_error("AI 连接地址无效，请检查 AI 连接设置")
+            return
 
-    def _is_current_ai_request(
-        self,
-        request_generation: int,
-        gateway: OpenCodeGateway,
-    ) -> bool:
-        return (
-            not self._closed
-            and request_generation == self._ai_request_generation
-            and gateway is self._opencode
+        self._ai_request_generation += 1
+        self._ai_busy = True
+        request_generation = self._ai_request_generation
+        context = self._context_builder.from_source(
+            self._current_source,
+            self._current_relative_path,
+            self._selection,
         )
+        effective_question = (
+            "EDIT REQUEST: Replace exactly the selected source lines according to this request: "
+            + question
+            if edit_mode
+            else question
+        )
+        prompt = self._context_builder.prompt(effective_question, context)
+        self._pending_edit = edit_mode
+        self._pending_edit_selection = self._selection
+        self._pending_edit_text = ""
+        self._pending_edit_path = self._current_document_path if edit_mode else None
+        self._pending_edit_base_hash = context.source_hash if edit_mode else ""
+        self._ai.append_user(question)
+        self._ai.begin_assistant(edit_mode=edit_mode)
 
-    def _on_ai_text(
-        self,
-        request_generation: int,
-        gateway: OpenCodeGateway,
-        text: str,
-    ) -> bool:
-        if not self._is_current_ai_request(request_generation, gateway):
-            return GLib.SOURCE_REMOVE
+        # Ask carries the bounded success history; Edit is a one-shot request
+        # without history (spec §11.4/§11.5).
+        if edit_mode:
+            system_prompt = EDIT_SYSTEM_PROMPT
+            history = [ChatMessage("user", prompt)]
+        else:
+            system_prompt = SYSTEM_PROMPT
+            history = list(self._conversation.messages) + [ChatMessage("user", prompt)]
+
+        cancellable = Gio.Cancellable()
+        self._ai_stream_cancellable = cancellable
+
+        def resolve_key() -> object:
+            if profile.auth_mode != "bearer":
+                return None
+            try:
+                return self._ai_secret_store.lookup(profile.profile_id)
+            except AiError:
+                return ""
+
+        def start_stream(key: object) -> None:
+            if self._closed or request_generation != self._ai_request_generation:
+                self._clear_pending_edit()
+                self._ai_busy = False
+                return
+            # The cancellable reference stays alive for the whole stream so
+            # the stop button, document/workspace switches and config changes
+            # can cancel the underlying network request (spec §8.6).
+            if key == "":
+                self._ai_stream_cancellable = None
+                self._ai_busy = False
+                self._clear_pending_edit()
+                self._ai.show_error("API Key 已丢失，请重新输入")
+                self._ai.set_ai_state(AiPanelState.SECRET_ERROR)
+                return
+            authorization = f"Bearer {key}" if key else None
+            self._ai_gateway.stream(
+                endpoint_url=endpoint,
+                authorization=authorization,
+                model_id=profile.model_id,
+                system_prompt=system_prompt,
+                messages=history,
+                mode="edit" if edit_mode else "ask",
+                secret=key if isinstance(key, str) else "",
+                cancellable=cancellable,
+                on_text=lambda text: self._on_ai_text(request_generation, text),
+                on_done=lambda outcome: self._on_ai_outcome(
+                    request_generation, edit_mode, question, outcome
+                ),
+                on_error=lambda error: self._on_ai_error(request_generation, error),
+            )
+
+        self._run_off_main_thread(resolve_key, start_stream)
+
+    def _is_current_ai_request(self, request_generation: int) -> bool:
+        return not self._closed and request_generation == self._ai_request_generation
+
+    def _on_ai_text(self, request_generation: int, text: str) -> None:
+        if not self._is_current_ai_request(request_generation):
+            return
         if self._pending_edit:
             self._pending_edit_text += text
         else:
             self._ai.append_assistant_text(text)
-        return GLib.SOURCE_REMOVE
 
-    def _on_ai_done(
+    def _on_ai_outcome(
         self,
         request_generation: int,
-        gateway: OpenCodeGateway,
-        _event: dict,
-    ) -> bool:
-        if not self._is_current_ai_request(request_generation, gateway):
-            return GLib.SOURCE_REMOVE
-        if self._pending_edit:
-            self._finish_edit_proposal()
-        else:
+        edit_mode: bool,
+        question: str,
+        outcome: ChatOutcome,
+    ) -> None:
+        if not self._is_current_ai_request(request_generation):
+            return
+        self._ai_busy = False
+        # The stream has reached its terminal state: drop the cancellable so
+        # "has active stream" stays truthful for later cancels (swarm audit
+        # F3).
+        self._ai_stream_cancellable = None
+        if edit_mode:
+            if outcome.success:
+                self._finish_edit_proposal()
+            else:
+                self._clear_pending_edit()
+                self._ai.show_error("AI 生成修改建议不完整，请重试")
+                self._update_ai_state()
+            return
+        if outcome.success:
+            # Only an explicit success enters the history (spec §11.4 step 8).
+            commit_ask_if_successful(
+                self._conversation,
+                question,
+                success=True,
+                full_text=outcome.full_text,
+            )
             self._ai.finish_assistant()
-        return GLib.SOURCE_REMOVE
+            if os.environ.get("MDREADER_TEST_AI_ASK_MARKER") == "1":
+                print(
+                    f"MDREADER_TEST_AI_ASK_DONE=1 text={outcome.full_text!r}",
+                    flush=True,
+                )
+        else:
+            # Truncated or otherwise incomplete: keep the partial text, never
+            # commit it to history (spec §8.4).
+            self._ai.finish_assistant()
+            self._ai.append_note("（回答未完整生成，已保留上述内容）")
+            self._update_ai_state()
 
-    def _on_ai_error(
-        self,
-        request_generation: int,
-        gateway: OpenCodeGateway,
-        error: Exception,
-    ) -> bool:
-        if not self._is_current_ai_request(request_generation, gateway):
-            return GLib.SOURCE_REMOVE
-        self._ai.show_error(str(error))
+    def _on_ai_error(self, request_generation: int, error: Exception) -> None:
+        if not self._is_current_ai_request(request_generation):
+            return
+        self._ai_busy = False
+        self._ai_stream_cancellable = None
         self._clear_pending_edit()
-        return GLib.SOURCE_REMOVE
+        code = error.code if isinstance(error, AiError) else AiErrorCode.NETWORK_FAILED
+        message = error_message(code, context="chat") or "AI 服务请求失败"
+        if code is AiErrorCode.CANCELLED:
+            # A stop is not an error: keep the partial text and allow retry
+            # (spec §8.6).
+            self._ai.finish_assistant()
+            self._update_ai_state()
+            return
+        self._ai.show_error(message)
+        if code in (
+            AiErrorCode.AUTHENTICATION_FAILED,
+            AiErrorCode.PERMISSION_DENIED,
+        ):
+            self._ai.set_ai_state(AiPanelState.AUTH_ERROR, detail=message)
+        elif code in (
+            AiErrorCode.SECRET_NOT_FOUND,
+            AiErrorCode.SECRET_SERVICE_UNAVAILABLE,
+        ):
+            self._ai.set_ai_state(AiPanelState.SECRET_ERROR, detail=message)
+        else:
+            # Network/provider failures keep the transcript and question for
+            # retry (spec §10.4 NETWORK_ERROR).
+            self._update_ai_state()
 
     def _on_ai_cancel(self) -> None:
         self._cancel_ai_request(reset_conversation=False)
 
-    def _cancel_ai_request(self, *, reset_conversation: bool) -> None:
+    def _cancel_ai_stream(self, *, mark_stopped: bool) -> None:
+        """Bump the request generation and cancel the underlying network
+        stream. The stream's stale callbacks are then dropped by generation
+        checks; with ``mark_stopped`` the panel is returned to a non-running
+        state and the partial text is marked as stopped (spec §8.6)."""
         self._ai_request_generation += 1
-        if self._opencode is not None:
-            self._opencode.reset_session()
+        self._ai_busy = False
+        had_active_stream = self._ai_stream_cancellable is not None
+        if self._ai_stream_cancellable is not None:
+            self._ai_stream_cancellable.cancel()
+            self._ai_stream_cancellable = None
         self._clear_pending_edit()
+        if had_active_stream and mark_stopped:
+            # A stop is not an error: keep the partial text, remove the
+            # thinking row and allow retry (spec §8.6).
+            self._ai.finish_assistant()
+            self._update_ai_state()
+            if os.environ.get("MDREADER_TEST_AI_ASK_MARKER") == "1":
+                print("MDREADER_TEST_AI_STOPPED=1", flush=True)
+
+    def _cancel_ai_request(self, *, reset_conversation: bool) -> None:
+        self._cancel_ai_stream(mark_stopped=not reset_conversation)
         if reset_conversation:
             self._ai.reset_conversation()
 
@@ -1628,6 +1940,11 @@ pacstrap -K /mnt base linux linux-firmware
             "应用 AI 修改？",
             f"只会修改 {proposal.path.name} 的第 {proposal.start_line}–{proposal.end_line} 行。",
         )
+        # Same surface-consistency as the AI 连接设置 clear-confirm alert:
+        # the confirm dialog should carry the active reading theme's surface
+        # class so the generated theme CSS (dialog.theme-<id>) paints it with
+        # the theme palette instead of libadwaita's near-black in dark themes.
+        dialog.add_css_class(self._theme.css_class)
         dialog.set_extra_child(scrolled)
         dialog.add_response("cancel", "取消")
         dialog.add_response("apply", "应用修改")

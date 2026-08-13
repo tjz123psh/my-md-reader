@@ -68,6 +68,21 @@ if (( ${#missing_commands[@]} > 0 )) || [[ "$runtime_ok" != true ]]; then
     fail "依赖安装完成后，请重新执行一键安装命令。"
 fi
 
+# AI 问答所需的 GI typelib 是可选的：缺失只降级 AI，不阻塞安装或阅读。
+ai_runtime_ok=true
+if ! python3 -c '
+import gi
+gi.require_version("Soup", "3.0")
+gi.require_version("Secret", "1")
+from gi.repository import Soup, Secret  # noqa: F401
+' >/dev/null 2>&1; then
+    ai_runtime_ok=false
+fi
+if [[ "$ai_runtime_ok" != true ]]; then
+    printf '[MD Reader] 未检测到 libsoup3/libsecret 的 GI 类型库，AI 问答功能将不可用。\n' >&2
+    printf '[MD Reader] 缺少时不影响 Markdown 阅读；如需 AI 问答，请安装 libsoup3、libsecret 及 python-gobject 的对应绑定。\n' >&2
+fi
+
 work_dir="$(mktemp -d -t mdreader-install-XXXXXXXX)"
 cleanup() {
     rm -rf "$work_dir"

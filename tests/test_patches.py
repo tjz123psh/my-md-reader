@@ -97,7 +97,7 @@ class PatchServiceTests(unittest.TestCase):
     def test_propose_rejects_file_changed_during_model_response(self) -> None:
         original_hash = self.base_hash()
         self.path.write_text("one\nexternally changed\nthree\n", encoding="utf-8")
-        with self.assertRaisesRegex(PatchError, "OpenCode 生成建议期间"):
+        with self.assertRaisesRegex(PatchError, "AI 生成建议期间"):
             self.service.propose(
                 self.path,
                 expected_start=2,

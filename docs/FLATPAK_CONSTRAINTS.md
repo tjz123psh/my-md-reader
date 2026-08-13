@@ -1,23 +1,23 @@
-# Flatpak and OpenCode constraints
+# Flatpak network and Secret Service constraints
 
 ## Status
 
 Flatpak is not the first packaging target. The native Meson install remains the
-supported delivery path until workspace portal behavior and a narrow OpenCode
-host bridge pass the gates below. The development host currently has Flatpak
-1.18.0 plus active Desktop and Documents portals.
+supported delivery path until workspace portal behavior, direct network access
+and Secret Service access pass the gates below. The development host currently
+has Flatpak 1.18.0 plus active Desktop and Documents portals.
 
 ## Permission principles
 
-- Keep the reader useful without network access or an OpenCode bridge.
+- Keep the reader useful without network access or a reachable Secret Service.
 - Use `Gtk.FileDialog` and the Documents portal instead of granting
   `--filesystem=home` or `--filesystem=host`.
 - Do not grant `org.freedesktop.Flatpak` access merely to call arbitrary host
   commands through `flatpak-spawn --host`.
-- Never copy provider credentials into the sandbox. OpenCode continues to own
-  credentials and provider configuration.
+- Never copy provider credentials into the sandbox. API keys stay in the host
+  Secret Service and are read only over the reviewed keyring boundary.
 - Preserve the existing app-owned diff, containment, conflict and Undo boundary
-  regardless of which side of the sandbox runs OpenCode.
+  regardless of which side of the sandbox sends AI requests.
 
 ## Workspace portal checks
 
@@ -37,33 +37,29 @@ the following behavior must be verified against that path rather than assumed:
 | Links | `Gtk.UriLauncher` continues through the OpenURI portal |
 
 The canonical workspace root may be a `/run/user/$UID/doc/...` path rather than
-the host path. No prompt, transcript or OpenCode command may translate it back
-to or disclose an unrestricted host workspace path.
+the host path. No prompt, transcript or AI request may translate it back to or
+disclose an unrestricted host workspace path.
 
-## OpenCode boundary
+## Network and Secret Service boundary
 
-The host `/usr/bin/opencode` is not visible inside a normal Flatpak sandbox.
-Three integration approaches have different costs:
+AI requests go directly from the app to the user-configured OpenAI-compatible
+endpoint, so a Flatpak sandbox faces two separate constraints:
 
-1. **Narrow host helper, preferred for evaluation.** A separately installed
-   native helper owns the OpenCode subprocess and exposes only model listing,
-   bounded prompt streaming and cancellation over an authenticated D-Bus or
-   Unix-socket interface. It runs OpenCode in the same private temporary
-   directory and deny-all configuration used by the native app. The Flatpak
-   never sends a workspace path or asks the helper to read/write files.
-2. **OpenCode server or ACP transport, possible alternative.** Connect to an
-   explicitly started host service with authenticated local transport. This
-   needs a clear socket/network permission, lifecycle and origin policy before
-   it can replace the subprocess gateway.
-3. **Direct host spawn or bundled OpenCode, rejected as defaults.** Broad
-   `flatpak-spawn --host` permission exposes arbitrary host command execution.
-   Bundling OpenCode duplicates provider state and complicates credentials and
-   updates. Neither is justified for the first Flatpak.
+1. **Network access.** Reaching `{api_base_url}` requires `--share=network`,
+   a broad capability for an otherwise local reader. It must be justified and
+   reviewed before release: prompts must never contain canonical workspace
+   paths, and the Authorization header must never be sent to another origin
+   after a redirect.
+2. **Secret Service.** API keys are stored in the host keyring under the
+   `io.github.pang.mdreader.ai` schema. The sandbox needs the session bus and
+   `org.freedesktop.secrets` (or a reviewed keyring portal on the target
+   runtime). When the keyring daemon is unreachable, the app must fail closed
+   to the existing "AI not configured" state without breaking reading.
 
-The bridge must return model text only. AI replacement JSON still goes through
-`PatchService` inside the app, so the model/helper never gains a write API. If
-the helper is absent, the existing “OpenCode unavailable” state is the complete
-and acceptable fallback.
+The model never gains a write API: AI responses still go through `PatchService`
+inside the app, so no transport change can write files. If network or Secret
+Service access is unavailable, the existing "AI unavailable" state is the
+complete and acceptable fallback.
 
 ## Candidate manifest surface
 
@@ -75,10 +71,12 @@ The eventual manifest should start from the smallest graphical surface:
 --device=dri
 ```
 
-Do not add `--share=network` unless the selected OpenCode transport requires
-the sandbox itself to connect to a local service. Do not add home/host
-filesystem access, background permission, Secret Service access or
+Do not add `--share=network` without a separately reviewed justification, and
+do not add home/host filesystem access, background permission or
 `--talk-name=org.freedesktop.Flatpak` without a separately reviewed need.
+Secret Service access should be added as the narrow session-bus talk name
+`org.freedesktop.secrets` (with `--socket=session-bus`) rather than a broad
+D-Bus policy, and only after the keyring reachability gates below pass.
 
 ## Release gates
 
@@ -87,8 +85,11 @@ filesystem access, background permission, Secret Service access or
 - Run workspace scan, image, monitor, accepted patch, conflict and Undo tests on
   a portal-granted fixture folder.
 - Revoke the grant while open and after restart; both cases must fail clearly.
-- Verify the helper cannot receive absolute workspace paths or invoke tools.
-- Verify reading with no helper and no network.
+- Verify prompts never contain canonical workspace paths and that no AI request
+  carries an absolute host path or leaks the Authorization header across origins.
+- Verify keyring reachability: unlock prompts work, and an unreachable keyring
+  degrades to the "AI not configured" state without breaking reading.
+- Verify reading with no network and no Secret Service access.
 - Repeat 640, 960, 1280 and 1920 Niri screenshots, high contrast, keyboard-only
   navigation and 200% text scaling using the Flatpak application ID.
 

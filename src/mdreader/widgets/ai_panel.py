@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -13,9 +11,50 @@ gi.require_version("Gio", "2.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
-from mdreader.models import DocumentSelection
+from mdreader.models import AiPanelState, DocumentSelection
 from mdreader.services.ai_markdown import AiMarkdownBlock, AiMarkdownRenderer
 from mdreader.services.themes import ReaderTheme
+
+# State -> (icon, title, description, button label). The button is hidden
+# when the label is empty or no on_configure callback was provided.
+_STATUS_COPY: dict[AiPanelState, tuple[str, str, str, str]] = {
+    AiPanelState.UNCONFIGURED: (
+        "network-offline-symbolic",
+        "尚未配置 AI 服务",
+        "配置 API 地址和密钥后即可开始问答；文档阅读功能始终可用",
+        "配置 AI 连接",
+    ),
+    AiPanelState.READY_NO_DOCUMENT: (
+        "chat-symbolic",
+        "已配置，等待打开文档",
+        "打开文档后即可提问",
+        "",
+    ),
+    AiPanelState.READY: (
+        "chat-symbolic",
+        "讨论当前文档",
+        "询问当前章节，或选择文字以提供精确上下文",
+        "",
+    ),
+    AiPanelState.AUTH_ERROR: (
+        "network-error-symbolic",
+        "API Key 无效或无权访问",
+        "请检查 AI 连接设置中的地址与密钥",
+        "打开 AI 连接设置",
+    ),
+    AiPanelState.NETWORK_ERROR: (
+        "network-error-symbolic",
+        "网络错误",
+        "请检查网络连接后重试；对话与问题仍保留",
+        "打开 AI 连接设置",
+    ),
+    AiPanelState.SECRET_ERROR: (
+        "network-offline-symbolic",
+        "系统密钥环不可用或密钥丢失",
+        "请打开 AI 连接设置重新输入 API Key",
+        "打开 AI 连接设置",
+    ),
+}
 
 
 class AiPanel(Gtk.Box):
@@ -25,6 +64,7 @@ class AiPanel(Gtk.Box):
         on_send: Callable[[str, bool], None],
         on_cancel: Callable[[], None],
         *,
+        on_configure: Callable[[], None] | None = None,
         current_model: str,
         theme: ReaderTheme,
     ) -> None:
@@ -33,6 +73,7 @@ class AiPanel(Gtk.Box):
         self._on_jump_to_selection = on_jump_to_selection
         self._on_send = on_send
         self._on_cancel = on_cancel
+        self._on_configure = on_configure
         self._selection = DocumentSelection()
         self._document: Path | None = None
         self._assistant_body: Gtk.Box | None = None
@@ -46,11 +87,8 @@ class AiPanel(Gtk.Box):
         self._markdown = AiMarkdownRenderer()
         self._theme = theme
         self._running = False
-        self._available = (
-            os.environ.get("MDREADER_TEST_OPENCODE_MISSING") != "1"
-            and shutil.which("opencode") is not None
-        )
-        self._models: tuple[str, ...] = ()
+        self._ai_state = AiPanelState.UNCONFIGURED
+        self._state_detail = ""
 
         header_title = Gtk.Label(label="AI 助手")
         header_title.add_css_class("heading")
@@ -80,16 +118,18 @@ class AiPanel(Gtk.Box):
         )
         header.pack_end(close_button)
 
-        self._model_menu = Gio.Menu()
-        self._model_button = Gtk.MenuButton(
-            icon_name="view-more-symbolic",
-            menu_model=self._model_menu,
+        # The model state lives in the connection dialog (spec §10.3): the
+        # header button opens the same AI connection settings and never keeps
+        # a second, duplicated model state.
+        self._model_button = Gtk.Button(
+            icon_name="emblem-system-symbolic",
             sensitive=False,
         )
-        self._model_button.set_tooltip_text("选择 OpenCode 模型")
+        self._model_button.set_tooltip_text("AI 连接设置")
         self._model_button.update_property(
-            [Gtk.AccessibleProperty.LABEL], ["选择 OpenCode 模型"]
+            [Gtk.AccessibleProperty.LABEL], ["AI 连接设置"]
         )
+        self._model_button.connect("clicked", self._on_configure_clicked)
         header.pack_end(self._model_button)
         self.set_current_model(current_model)
 
@@ -159,14 +199,17 @@ class AiPanel(Gtk.Box):
         content.append(self._scroll)
 
         self._status = Adw.StatusPage(
-            icon_name="chat-symbolic" if self._available else "network-offline-symbolic",
-            title="讨论当前文档" if self._available else "OpenCode 不可用",
-            description=(
-                "询问当前章节，或选择文字以提供精确上下文"
-                if self._available
-                else "请安装并配置 OpenCode；文档阅读功能仍可正常使用"
-            ),
+            icon_name="network-offline-symbolic",
+            title="尚未配置 AI 服务",
+            description="配置 API 地址和密钥后即可开始问答；文档阅读功能始终可用",
         )
+        self._status_button = Gtk.Button(
+            label="配置 AI 连接",
+            has_frame=False,
+        )
+        self._status_button.add_css_class("suggested-action")
+        self._status_button.connect("clicked", self._on_configure_clicked)
+        self._status.set_child(self._status_button)
         self._transcript.append(self._status)
 
         composer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -246,38 +289,46 @@ class AiPanel(Gtk.Box):
         self._last_rendered_text = ""
         self._assistant_history.clear()
         self._clear_box(self._transcript)
-        self._status.set_icon_name(
-            "chat-symbolic" if self._available else "network-offline-symbolic"
-        )
-        self._status.set_title(
-            "讨论当前文档" if self._available else "OpenCode 不可用"
-        )
-        self._status.set_description(
-            description
-            if self._available
-            else "请安装并配置 OpenCode；文档阅读功能仍可正常使用"
-        )
+        self._update_status_page(description=description)
         self._transcript.append(self._status)
         self._set_running(False)
+
+    def set_ai_state(self, state: AiPanelState, *, detail: str = "", reset: bool = False) -> None:
+        """Receive typed availability from the coordinator (spec §10.4).
+
+        The panel never probes executables or environment variables; the
+        window decides the state and injects it here.
+        """
+        self._ai_state = AiPanelState(state)
+        self._state_detail = detail
+        if reset:
+            self.reset_conversation()
+        else:
+            self._update_status_page()
+            self._update_composer()
+
+    def _update_status_page(self, description: str | None = None) -> None:
+        icon, title, default_desc, button_label = _STATUS_COPY.get(
+            self._ai_state, _STATUS_COPY[AiPanelState.UNCONFIGURED]
+        )
+        self._status.set_icon_name(icon)
+        self._status.set_title(title)
+        self._status.set_description(
+            self._state_detail or (description if description is not None else default_desc)
+        )
+        show_button = bool(button_label) and self._on_configure is not None
+        self._status_button.set_label(button_label or "配置 AI 连接")
+        self._status_button.set_visible(show_button)
+
+    def _on_configure_clicked(self, _button: Gtk.Button) -> None:
+        if self._on_configure is not None:
+            self._on_configure()
 
     def close(self) -> None:
         self._cancel_render_timeout()
         if self._scroll_source_id:
             GLib.source_remove(self._scroll_source_id)
             self._scroll_source_id = 0
-
-    def set_model_options(self, models: tuple[str, ...], current_model: str) -> None:
-        self._models = models
-        self._model_menu.remove_all()
-        for model in models:
-            item = Gio.MenuItem.new(self._short_model_name(model), None)
-            item.set_action_and_target_value(
-                "win.select-model",
-                GLib.Variant.new_string(model),
-            )
-            self._model_menu.append_item(item)
-        self.set_current_model(current_model)
-        self._update_composer()
 
     def set_current_model(self, model: str, *, new_conversation: bool = False) -> None:
         label = self._short_model_name(model)
@@ -330,7 +381,7 @@ class AiPanel(Gtk.Box):
         self._archive_current_assistant()
         self._hide_status()
         block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        label = Gtk.Label(label="OpenCode", xalign=0)
+        label = Gtk.Label(label="AI 助手", xalign=0)
         label.add_css_class("caption")
         label.add_css_class("dimmed")
         block.append(label)
@@ -340,7 +391,7 @@ class AiPanel(Gtk.Box):
         self._thinking_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
         self._thinking_row.add_css_class("ai-thinking")
         spinner = Adw.Spinner()
-        spinner.update_property([Gtk.AccessibleProperty.LABEL], ["OpenCode 正在思考"])
+        spinner.update_property([Gtk.AccessibleProperty.LABEL], ["AI 正在思考"])
         thinking_label = Gtk.Label(
             label="正在准备选中内容的修改…" if edit_mode else "正在思考…",
             xalign=0,
@@ -392,15 +443,25 @@ class AiPanel(Gtk.Box):
         else:
             self._render_assistant_text()
             self._remove_thinking_row()
-            self._transcript.append(self._message_block("OpenCode", message, "error"))
+            self._transcript.append(self._message_block("AI 助手", message, "error"))
         self._set_running(False)
+        self._scroll_to_bottom()
+
+    def append_note(self, text: str) -> None:
+        """Append a neutral caption note to the transcript (e.g. a truncated
+        reply marker). Never styled as an error."""
+        note = Gtk.Label(
+            label=text,
+            xalign=0,
+            wrap=True,
+        )
+        note.add_css_class("caption")
+        note.add_css_class("dimmed")
+        self._transcript.append(note)
         self._scroll_to_bottom()
 
     def focus_composer(self) -> None:
         self._prompt_entry.grab_focus()
-
-    def popup_model_menu(self) -> None:
-        self._model_button.popup()
 
     def refresh_theme(self, theme: ReaderTheme) -> None:
         self._theme = theme
@@ -415,6 +476,14 @@ class AiPanel(Gtk.Box):
         if not text or self._running or not self._document:
             return
         edit_mode = self._mode_group.get_active_name() == "edit"
+        if edit_mode and self._selection.is_empty:
+            # Edit mode needs a selected document range. The send button is
+            # disabled in this state, but Enter bypasses buttons: do NOT
+            # clear the draft here (swarm audit H1 — Enter silently wiped
+            # the user's input and only then showed the error).
+            self._edit_banner.set_revealed(True)
+            self._prompt_entry.grab_focus()
+            return
         self._prompt_entry.set_text("")
         self._on_send(text, edit_mode)
 
@@ -449,20 +518,21 @@ class AiPanel(Gtk.Box):
         self._update_composer()
 
     def _update_composer(self) -> None:
-        enabled = self._available and self._document is not None and not self._running
+        ready = self._ai_state is AiPanelState.READY
+        enabled = ready and self._document is not None and not self._running
         if self._prompt_entry.get_sensitive() != enabled:
             self._prompt_entry.set_sensitive(enabled)
         self._update_send_button(enabled)
         self._mode_group.set_sensitive(enabled)
         self._edit_mode.set_enabled(enabled)
         self._model_button.set_sensitive(
-            self._available and bool(self._models) and not self._running
+            self._on_configure is not None and not self._running
         )
 
     def _update_send_button(self, enabled: bool | None = None) -> None:
         if enabled is None:
             enabled = (
-                self._available
+                self._ai_state is AiPanelState.READY
                 and self._document is not None
                 and not self._running
             )
@@ -604,7 +674,9 @@ class AiPanel(Gtk.Box):
 
     @staticmethod
     def _short_model_name(model: str) -> str:
-        return model.removeprefix("opencode/")
+        # Model IDs are now arbitrary user-provided identifiers; keep the full
+        # ID (ellipsized by the label) instead of stripping any prefix.
+        return model
 
     @staticmethod
     def _clear_box(box: Gtk.Box) -> None:

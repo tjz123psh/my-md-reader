@@ -13,11 +13,12 @@
   <description>
     <p>
       MD Reader is a read-only Markdown workspace with a file tree, document
-      outline, warm long-form typography and an optional OpenCode assistant.
+      outline, warm long-form typography and an optional AI assistant that
+      works with user-configured OpenAI-compatible services.
     </p>
     <p xml:lang="zh_CN">
       MD Reader 是一个只读 Markdown 工作区，提供文件树、文档大纲、舒适的
-      长文排版，以及可选的 OpenCode AI 助手。
+      长文排版，以及可选的 AI 问答助手，支持用户配置的 OpenAI-compatible 服务。
     </p>
   </description>
   <launchable type="desktop-id">io.github.pang.mdreader.desktop</launchable>

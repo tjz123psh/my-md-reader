@@ -8,8 +8,8 @@ technical documentation. The single primary job is to open a local Markdown
 document directly, or open its folder as a workspace, and make the content
 comfortable to navigate, understand and discuss.
 
-The application must remain useful with no account, no network and no
-OpenCode installation. AI is an additive panel, not the application shell.
+The application must remain useful with no account, no network and no AI
+service configured. AI is an additive panel, not the application shell.
 
 ## 2. Recorded environment
 
@@ -23,7 +23,9 @@ Environment inspected on 2026-07-15 and revalidated on 2026-07-16:
 - GTK 4.22.4, libadwaita 1.9.2, PyGObject 3.56.3, WebKitGTK 6.0
   2.52.5, Meson 1.11.2, Ninja 1.13.2 and Blueprint Compiler 0.22.2 are
   installed.
-- OpenCode 1.18.2 is installed at `/usr/bin/opencode`.
+- OpenCode 1.18.2 was installed at `/usr/bin/opencode` at inspection time.
+  The direct-LLM migration removes the runtime dependency, so this entry is a
+  legacy record of the pre-migration environment.
 
 Breakpoints must sit between actual presets so resizing animations cannot
 oscillate around a boundary. The initial thresholds are 760sp and 1120sp.
@@ -98,26 +100,41 @@ keyboard focus away from the document. When the document is at its end, the
 last heading remains reachable even if it cannot cross the normal viewport
 probe.
 
-### OpenCode boundary
+### Direct LLM boundary
 
-OpenCode access is hidden behind an interface so UI and session state do not
-depend on one transport:
+AI access is hidden behind a provider-neutral gateway so UI and session state
+do not depend on one transport:
 
 ```text
-AiPanel → window coordinator → ContextBuilder → OpenCodeGateway → OpenCode
+AiPanel → window coordinator → ContextBuilder + ConversationState
+                           └─→ AiSecretStore
+                           └─→ OpenAICompatibleGateway
+                                  ├── EndpointPolicy
+                                  ├── ModelCatalogClient → GET /models
+                                  └── ChatCompletionsClient → POST /chat/completions
                            └─→ PatchService → diff approval → atomic write
 ```
 
-The implemented transport consumes `opencode run --format json` as an
-asynchronous subprocess. OpenCode 1.18.2 emits `step_start`, `text` and
-`step_finish` records; their `sessionID` is retained for follow-up turns. A
-later server or ACP transport can replace it without widget changes.
+The target transport is a direct OpenAI-compatible HTTP gateway over libsoup 3
+that replaces the legacy OpenCode subprocess. The migration is in progress;
+until it lands, the current code still runs `opencode run --format json` as an
+asynchronous subprocess, but the architecture described here is the binding
+contract for the migration.
 
-The model menu enumerates `opencode models opencode --pure` on a background
-thread in the same private runtime and deny-all environment. The gateway only
-accepts current `opencode/*-free` identifiers and the zero-cost
-`opencode/big-pickle` model. Changing models is rejected while a response is
-running and clears the retained OpenCode session before the next message.
+Connection is configured in-app: an API base URL, an auth mode and an API key.
+The key is stored in the Secret Service and never persists in GSettings, plain
+files, logs, command lines, screenshots or test snapshots; it is only attached
+to the HTTP `Authorization` header of outgoing requests. A strict endpoint
+policy normalizes the URL, allows HTTP only for exact loopback hosts (TLS
+verification can never be disabled), constructs `/chat/completions` and
+`/models` from parsed URI components, and follows redirects manually: no
+automatic follow, every hop revalidated, at most 3 hops, same origin only and
+no HTTPS downgrade, so the Authorization header never crosses origins.
+
+The model catalog is fetched from `GET {base}/models` on demand with the
+current form draft and held only in memory; the app never connects at startup.
+The user picks from a searchable model list or types a model ID manually. The
+legacy free-model filter and `opencode/` prefix rules are removed.
 
 Every user message carries an explicit context envelope:
 
@@ -135,6 +152,11 @@ does not resend an entire large file on every turn. The first version has no
 repository-wide search tools; users open or select the additional document
 context they want to discuss.
 
+ConversationState keeps a bounded, in-memory, success-only Ask history: at most
+12 messages and 48,000 characters, cleared on document, model or connection
+switch. Edit is a one-shot request with its own system prompt and never carries
+the Ask history.
+
 Assistant Markdown is parsed locally with raw HTML disabled and mapped to
 native GTK labels, grids and code blocks. Headings, emphasis, links, lists,
 quotes and tables retain structure; fenced code uses Pygments colors. An
@@ -151,17 +173,14 @@ IME candidate first and sends only after composition has completed. The nested
 AI header disables window title buttons and owns a separate Hide action,
 so closing the panel cannot close the application window.
 
-OpenCode never runs with `--auto`. The gateway injects an app-owned agent via
-`OPENCODE_CONFIG_CONTENT`, sets `OPENCODE_PERMISSION={"*":"deny"}`, disables
-project configuration, external skills and default plugins, and still uses
-`--pure`. The resolved 1.18.2 agent has every known tool set to `false`.
-
-The subprocess also runs in a private, empty `mdreader-opencode-*` temporary
-directory rather than the user's workspace. The prompt contains only the
-relative document path and bounded excerpt. This is a second boundary against
-future OpenCode permission regressions: the model process is neither located
-in nor told the canonical workspace path. `.opencode/agents/md-reader.md` is a
-developer reference, not a runtime dependency.
+The direct transport has no tool interface and the model is never given the
+workspace root: prompts contain only a relative document path and a bounded
+excerpt. Responses are bounded by layered size limits — decoded pre-parser
+response bytes, individual SSE events, single `data:` lines, Ask/Edit UTF-8
+text, model lists and error bodies — and exceeding any of them cancels the
+request. Every asynchronous operation carries a generation/request token and a
+cancellable handle, so stale callbacks can never overwrite newer state, and
+network, secret and parsing work never blocks the GTK main thread.
 
 An edit request may only return one JSON replacement for the exact selected
 source range. The app binds the request to the original canonical path and
@@ -193,23 +212,29 @@ The reader itself has no editable text surface and no Save action.
 src/mdreader/
 ├── bootstrap.py            pre-GTK environment and resource registration
 ├── application.py          app lifecycle, global actions, dependency checks
-├── window.py               composition and adaptive breakpoints
+├── window.py               composition, adaptive breakpoints, coordinator
 ├── models/
 │   ├── document.py         document/outline/selection value objects
 │   ├── file_node.py        tree-list GObject model
-│   └── conversation.py     messages, context, patch proposals
+│   ├── conversation.py     messages, context, patch proposals
+│   └── ai.py               AiProfile, AiModel, AiErrorCode, AiRequest
 ├── services/
 │   ├── workspace.py        scan, monitor, canonical path policy
 │   ├── markdown.py         token parsing, outline and safe HTML
-│   ├── settings.py         typed GSettings facade
+│   ├── settings.py         typed GSettings facade, ai-profile migration
 │   ├── themes.py           five shared GTK/WebKit theme token sets
 │   ├── context.py          AI context envelope construction
-│   ├── opencode.py         model catalog, gateway and async event stream
+│   ├── ai_endpoints.py     URL validation, normalization, endpoint construction, same-origin policy
+│   ├── ai_secrets.py       Secret Service (libsecret) save/read/clear
+│   ├── ai_models.py        /models request and response parsing
+│   ├── ai_stream.py        incremental UTF-8, SSE and JSON completion parsing
+│   ├── llm.py              provider-neutral gateway + OpenAI-compatible implementation
 │   └── patches.py          validate, preview, apply and undo
 ├── widgets/
 │   ├── library_sidebar.py  file tree / outline
 │   ├── document_view.py    WebKit view and selection bridge
-│   ├── ai_panel.py         messages, quote rail, composer
+│   ├── ai_panel.py         messages, quote rail, composer, typed state
+│   ├── ai_connection_dialog.py  connection config, model fetch/search/select
 │   └── empty_state.py      no-folder/no-document states
 └── resources/
     ├── ui/                 Blueprint templates
@@ -217,11 +242,19 @@ src/mdreader/
     └── reader/             HTML template, CSS and selection JS
 ```
 
+The tree above is the direct-LLM target layout (migration in progress). The
+legacy `services/opencode.py` and `tests/test_opencode.py` are removed once
+the gateway lands; no new code extends them. Network, parsing and secret
+responsibilities stay in separate services and must not be collapsed into
+`window.py` or `ai_panel.py`.
+
 Rules:
 
-- Widgets do not invoke OpenCode or write files directly.
+- Widgets do not issue network requests, touch the Secret Service, read raw
+  GSettings details or write files directly.
 - Services expose cancellable operations and plain/GObject models.
-- Only the window coordinates selected file, current outline and AI context.
+- Only the window coordinator combines service and UI state; it does not
+  implement URL joining, SSE parsing or secret storage.
 - WebKit script-message handlers accept JSON and validate types/lengths.
 - File monitoring is debounced; a save event must not trigger render storms.
 
@@ -234,11 +267,20 @@ GSettings stores preferences and lightweight session state:
 - document zoom (default 100, range 75–200, 5-point wheel steps);
 - one unified reading theme ID: Warm Paper, Mist Blue, Sage Leaf, Midnight
   Ink or Plum Night; legacy system/warm values migrate to a visible theme;
-- last selected OpenCode model identifier, with no credentials.
+- a single `ai-profile` key (type `a{ss}`) holding the non-secret connection
+  metadata: profile id, provider kind (`openai-compatible`), normalized API
+  base URL, optional explicit models URL, current model id and `auth-mode`.
+  The API key is never part of this value.
 
-The model menu is populated from OpenCode asynchronously. Secrets remain owned
-by OpenCode/provider storage. Chat transcripts containing document text are not
-persisted until a clear retention policy exists.
+The legacy `opencode-model` key remains in the schema marked deprecated; new
+code never writes it and its value is not migrated into the new provider
+profile. After a first upgrade the AI panel simply shows an unconfigured state.
+
+The API key lives in the Secret Service (`libsecret`) under an app-owned
+schema, never in GSettings or files. The model catalog is fetched on demand and
+kept only in memory; startup never triggers network access or keyring
+unlocking. Chat transcripts containing document text are not persisted until a
+clear retention policy exists.
 
 Document zoom is initiated by `Ctrl+mouse wheel` inside the WebKit surface.
 Each animation frame commits at most one final percentage, so a 5-point wheel
@@ -266,8 +308,10 @@ update the send button and do not rebuild or restyle the focused editor.
   secondary “Open Folder” actions.
 - Unsupported/binary file: keep navigation usable and explain the failure.
 - Render failure: show source filename and a retry action, never a blank view.
-- Missing OpenCode: reading remains fully functional and the AI panel explains
-  how to install/configure it.
+- AI not configured, runtime dependencies missing or keyring/network failure:
+  only the AI feature degrades; reading, search, zoom and outline stay fully
+  functional. The AI panel shows the matching typed state — unconfigured, auth,
+  network or secret error — with a configure action, never an install hint.
 - Model/network failure: preserve the transcript and context quote, show a
   bounded error and allow a new request; active responses are cancellable.
 - External file change: automatically rerender if there is no pending patch;
@@ -277,10 +321,19 @@ update the send button and do not rebuild or restyle the focused editor.
 
 - Unit tests: path containment, slug generation, outline extraction, source
   line metadata, HTML escaping, context trimming and patch conflict checks.
+- Pure logic tests with no GTK or network: URL policy (normalization, strict
+  loopback HTTP, same-origin, endpoint construction, manual redirect rules),
+  model catalog parsing, incremental SSE/JSON completion parsing and bounded
+  ConversationState history.
+- Integration tests against a local loopback stub server: model fetch success
+  and error classes (auth, 404/405, 429, timeout, malformed JSON), redirect
+  handling that proves cross-origin listeners never receive Authorization,
+  streaming with split Unicode chunks, cancellation and layered size limits.
 - Renderer fixtures: mixed Chinese/Latin text, nested lists, tables, task
   lists, long code, quotes, images, broken links and very large documents.
-- GTK smoke test: app starts with and without OpenCode, opens a single fixture
-  document and receives a real 100% → 105% WebKit wheel zoom message.
+- GTK smoke test: app starts with no AI configured and with Soup/Secret
+  typelibs missing, opens a single fixture document and receives a real
+  100% → 105% WebKit wheel zoom message.
 - Visual acceptance: real binary screenshots at 640, 960, 1280 and 1920 under
   Niri; all five themes, empty, long-title and AI-context states.
 - Accessibility: keyboard-only navigation, visible focus, high contrast and
@@ -290,6 +343,7 @@ update the send button and do not rebuild or restyle the focused editor.
 
 The first deliverable is a native Meson install runnable from the build tree.
 Desktop/AppStream metadata, a full-color scalable app icon and a symbolic icon
-are installed into the hicolor theme. Flatpak comes later, after its file portal
-and OpenCode subprocess strategy is tested. The permission boundary, rejected
-shortcuts and release gates are recorded in `docs/FLATPAK_CONSTRAINTS.md`.
+are installed into the hicolor theme. Flatpak comes later, after its file
+portal, network and Secret Service strategy is validated. The permission
+boundary, rejected shortcuts and release gates are recorded in
+`docs/FLATPAK_CONSTRAINTS.md`.

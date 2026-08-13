@@ -140,7 +140,7 @@ THEMES: tuple[ReaderTheme, ...] = (
         sidebar="#1D2530",
         paper="#222A35",
         ink="#E7ECF2",
-        muted="#AAB5C2",
+        muted="#BCC7D4",
         accent="#7FB4D4",
         accent_fg="#10202A",
         support="#8FC3A4",
@@ -163,7 +163,7 @@ THEMES: tuple[ReaderTheme, ...] = (
         sidebar="#2C222A",
         paper="#33282F",
         ink="#F0E4EA",
-        muted="#BFAEB7",
+        muted="#CCBCC6",
         accent="#D69AAA",
         accent_fg="#2B1820",
         support="#B8C49B",
@@ -208,9 +208,52 @@ def build_gtk_theme_css() -> str:
     rules: list[str] = []
     for theme in THEMES:
         root = f"window.{theme.css_class}"
+        dialog_root = f"dialog.{theme.css_class}"
         rules.append(
             f"""
 {root} {{
+  background: {theme.shell};
+  color: {theme.ink};
+}}
+{dialog_root} {{
+  /* Adw.PreferencesDialog / AlertDialog are hosted inside the parent
+     window as `dialog-host > dialog` nodes. The outer `dialog` node spans
+     the WHOLE window (libadwaita paints it transparent and uses it as the
+     dimming surface); painting it here would cover the parent content.
+     Only the inner `sheet` node is the visible dialog surface, and its
+     colors resolve through CSS variables such as --window-bg-color /
+     --card-bg-color, which default to the *system* color-scheme values
+     (near-black on a dark system even under FORCE_LIGHT). Redefining the
+     variables + painting the sheet themes the visible dialog without
+     hiding the window behind it. */
+  color: {theme.ink};
+  --window-bg-color: {theme.shell};
+  --window-fg-color: {theme.ink};
+  --view-bg-color: {theme.paper};
+  --view-fg-color: {theme.ink};
+  --dialog-bg-color: {theme.shell};
+  --dialog-fg-color: {theme.ink};
+  --card-bg-color: {theme.paper};
+  --card-fg-color: {theme.ink};
+  --headerbar-bg-color: {theme.shell};
+  --headerbar-fg-color: {theme.ink};
+  --popover-bg-color: {theme.shell};
+  --popover-fg-color: {theme.ink};
+}}
+{dialog_root} sheet {{
+  background: {theme.shell};
+  color: {theme.ink};
+}}
+{dialog_root}.alert {{
+  /* Same constraint as the preferences dialog: in-window presentation
+     spans the alert's outer `dialog.alert` node across the whole parent
+     window (it doubles as the dimming surface), so painting it here would
+     hide the window behind the alert. The visible box is the `sheet`
+     child (painted below); the variables on the enclosing dialog already
+     flow into it via --dialog-bg-color. */
+  color: {theme.ink};
+}}
+{dialog_root}.alert sheet {{
   background: {theme.shell};
   color: {theme.ink};
 }}
@@ -254,7 +297,8 @@ def build_gtk_theme_css() -> str:
   color: {theme.muted};
   border-color: {theme.support};
 }}
-{root} button.suggested-action {{
+{root} button.suggested-action,
+{dialog_root} button.suggested-action {{
   background: {theme.accent};
   color: {theme.accent_fg};
 }}

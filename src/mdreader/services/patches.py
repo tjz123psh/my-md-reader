@@ -61,7 +61,7 @@ class PatchService:
         old_content = self._read_text(path)
         base_hash = self._hash(old_content)
         if base_hash != expected_base_hash:
-            raise PatchError("OpenCode 生成建议期间，文件已发生变化")
+            raise PatchError("AI 生成建议期间，文件已发生变化")
         lines = old_content.splitlines(keepends=True)
         if start < 1 or end < start or end > len(lines):
             raise PatchError("选中的源码行已不存在")
