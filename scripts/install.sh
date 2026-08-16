@@ -101,7 +101,13 @@ curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
 
 mkdir -p "$source_dir"
 tar -xzf "$archive" --strip-components=1 -C "$source_dir"
+# 归档解压后立即删除，提前释放下载占用；整个临时目录在退出时仍由 trap 兜底。
+rm -f "$archive"
 [[ -f "$source_dir/meson.build" ]] || fail "下载的源码归档不完整。"
+
+# 剔除构建/安装用不到的源码内容（docs/ 与 scripts/ 均不被 meson 引用；
+# tests/ 必须保留，根 meson.build 有 subdir('tests')）。
+rm -rf "$source_dir/docs" "$source_dir/scripts"
 
 say "正在构建..."
 meson setup "$build_dir" "$source_dir" \
