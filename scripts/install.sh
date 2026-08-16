@@ -122,7 +122,36 @@ meson install -C "$build_dir"
 [[ -x "$PREFIX/bin/md-reader" ]] || fail "安装完成，但未找到启动器。"
 
 say "安装完成。运行：md-reader"
+
+# 自动把 PREFIX/bin 加入当前 shell 的 PATH（幂等；识别不了 shell 时退回提示）。
 if [[ ":${PATH:-}:" != *":$PREFIX/bin:"* ]]; then
-    printf '\n当前 PATH 尚未包含 %s/bin。请将下面一行加入 shell 配置：\n\n' "$PREFIX"
-    printf '  export PATH="%s/bin:%s"\n\n' "$PREFIX" "\$PATH"
+    shell_name="$(basename "${SHELL:-}")"
+    case "$shell_name" in
+        fish)
+            fish_config="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+            mkdir -p "$(dirname "$fish_config")"
+            if ! grep -qs "fish_add_path $PREFIX/bin" "$fish_config" 2>/dev/null; then
+                printf '\n# Added by md-reader installer\nfish_add_path %s/bin\n' "$PREFIX" >> "$fish_config"
+            fi
+            say "已将 $PREFIX/bin 加入 fish 的 PATH（$fish_config），新终端即可运行 md-reader。"
+            ;;
+        bash)
+            bash_config="$HOME/.bashrc"
+            if ! grep -qs "export PATH=\"$PREFIX/bin" "$bash_config" 2>/dev/null; then
+                printf '\n# Added by md-reader installer\nexport PATH="%s/bin:$PATH"\n' "$PREFIX" >> "$bash_config"
+            fi
+            say "已将 $PREFIX/bin 加入 bash 的 PATH（$bash_config），新终端即可运行 md-reader。"
+            ;;
+        zsh)
+            zsh_config="$HOME/.zshrc"
+            if ! grep -qs "export PATH=\"$PREFIX/bin" "$zsh_config" 2>/dev/null; then
+                printf '\n# Added by md-reader installer\nexport PATH="%s/bin:$PATH"\n' "$PREFIX" >> "$zsh_config"
+            fi
+            say "已将 $PREFIX/bin 加入 zsh 的 PATH（$zsh_config），新终端即可运行 md-reader。"
+            ;;
+        *)
+            printf '\n当前 PATH 尚未包含 %s/bin。请在 shell 配置中加入：\n\n' "$PREFIX"
+            printf '  export PATH="%s/bin:$PATH"\n\n' "$PREFIX"
+            ;;
+    esac
 fi
