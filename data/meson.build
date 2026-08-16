@@ -1,5 +1,16 @@
+# The desktop Exec must be an absolute path: user-local installs put the
+# launcher in a prefix that is not on the desktop session's PATH (fish/bash
+# config only affects terminals), so a bare command name would not launch.
+desktop_conf = configuration_data()
+desktop_conf.set('bindir', get_option('prefix') / get_option('bindir'))
+desktop_file = configure_file(
+  input: app_id + '.desktop',
+  output: app_id + '.desktop',
+  configuration: desktop_conf,
+)
+
 install_data(
-  app_id + '.desktop',
+  desktop_file,
   install_dir: get_option('datadir') / 'applications',
 )
 
@@ -32,7 +43,7 @@ if desktop_file_validate.found()
   test(
     'validate-desktop-file',
     desktop_file_validate,
-    args: files(app_id + '.desktop'),
+    args: desktop_file,
   )
 endif
 
